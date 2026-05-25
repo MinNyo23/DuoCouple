@@ -1,0 +1,6 @@
+{
+  "name": "UsSpace",
+  "description": "A glassmorphic shared couple space supporting a joint dashboard, live status tracking, learning progress roadmaps, daily calendar tasks, shared expense checkers, and AI savings advice.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

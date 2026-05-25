@@ -1,0 +1,7 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="66dp"
+        android:height="66dp"
+        android:gravity="center"
+        android:drawable="@drawable/modern_love_logo_1779427421346" />
+</layer-list>

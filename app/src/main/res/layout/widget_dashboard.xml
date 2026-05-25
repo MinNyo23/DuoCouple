@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Header Row -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:text="UsSpace Duo Node 🔮"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/widget_btn_refresh"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:contentDescription="Refresh Widget"
+            android:src="@android:drawable/ic_menu_rotate"
+            android:tint="#00ADC4" />
+    </RelativeLayout>
+
+    <!-- Content Sections Divider / Grid Layout represented by Horizontal Layout -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <!-- Lovedays Count Panel -->
+        <LinearLayout
+            android:id="@+id/widget_lovedays_panel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="#14FFFFFF"
+            android:layout_marginEnd="6dp"
+            android:padding="8dp"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="❤️ LOVEDAYS"
+                android:textColor="#FF4F84"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_lovedays_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="--"
+                android:textColor="#FFFFFF"
+                android:textSize="26sp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="2dp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_lovedays_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Days of Love"
+                android:textColor="#8B6CFF"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Money/Expense Panel -->
+        <LinearLayout
+            android:id="@+id/widget_expenses_panel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="#14FFFFFF"
+            android:layout_marginStart="6dp"
+            android:padding="8dp"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="💸 MONTH SPENT"
+                android:textColor="#00ADC4"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_expenses_sum"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="$--.-"
+                android:textColor="#FFFFFF"
+                android:textSize="22sp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="2dp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_expenses_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mutual Expenses"
+                android:textColor="#8E85BC"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Footer Bar to touch & open application -->
+    <TextView
+        android:id="@+id/widget_footer_tap"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="Tap to enter Duo Space 🚀"
+        android:textColor="#FF8B6CFF"
+        android:textSize="10sp"
+        android:layout_marginTop="10dp"
+        android:padding="4dp"
+        android:background="#148B6CFF" />
+
+</LinearLayout>
