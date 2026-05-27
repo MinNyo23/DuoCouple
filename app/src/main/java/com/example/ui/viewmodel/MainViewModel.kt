@@ -132,6 +132,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Seed data on cold start if database is empty
         viewModelScope.launch {
+            seedDefaultAccounts()
             seedInitialDatabaseIfEmpty()
             startTelemetryLoop()
             // Keep the loading screen active for 2 seconds to showcase the modern logo and background transition
@@ -216,6 +217,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .putString("partner_emoji", avatar)
                     .apply()
             }
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -250,6 +252,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putString("acc_emoji_$cleanEmail", emoji)
             .apply()
 
+        // Clear old local tables before creating a brand-new user to prevent leftover session leak
+        withContext(Dispatchers.IO) {
+            val appDao = AppDatabase.getDatabase(getApplication()).appDao()
+            appDao.clearUserProfiles()
+            appDao.clearLearningRoadmaps()
+            appDao.clearRoadmapLessons()
+            appDao.clearLearningTasks()
+            appDao.clearExpenseEntries()
+            appDao.clearSavingTasks()
+        }
+
         // Track active user email
         sharedPrefs.edit().putString("active_user_email", cleanEmail).apply()
 
@@ -262,6 +275,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         generateAndSetCoupleCode()
 
         logIn(name.trim(), emoji)
+        triggerBackupOfActiveUser()
         return null
     }
 
@@ -313,8 +327,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        val finalName = name ?: "Minnyo"
-        val finalEmoji = emoji ?: "🦁"
+        // Track active user email
+        sharedPrefs.edit().putString("active_user_email", cleanEmail).apply()
+
+        // Restore user data and config BEFORE triggering active login state
+        restoreUserData(cleanEmail)
+
+        val finalName = sharedPrefs.getString("my_name", "")?.takeIf { it.isNotBlank() } ?: name ?: "Minnyo"
+        val finalEmoji = sharedPrefs.getString("my_emoji", "")?.takeIf { it.isNotBlank() } ?: emoji ?: "🦁"
 
         // Ensure we pre-populate couple code if empty
         val currentCode = sharedPrefs.getString("couple_code", "") ?: ""
@@ -322,10 +342,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             generateAndSetCoupleCode()
         }
 
-        // Track active user email
-        sharedPrefs.edit().putString("active_user_email", cleanEmail).apply()
-
         logIn(finalName, finalEmoji)
+        triggerBackupOfActiveUser()
         return null
     }
 
@@ -427,6 +445,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     monthlySavingGoal = 550.0
                 )
             )
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -434,10 +453,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _loveStartDate.value = dateStr
         sharedPrefs.edit().putString("love_start_date", dateStr).apply()
         com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
+        triggerBackupOfActiveUser()
     }
 
     fun logOut() {
         viewModelScope.launch {
+            val email = getActiveUserEmail()
+            if (email.isNotBlank()) {
+                backupUserData(email)
+            }
+
             _isLoggedIn.value = false
             _isCoupled.value = false
             _coupleCode.value = ""
@@ -445,12 +470,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _myProfileEmoji.value = "🦁"
             _partnerProfileName.value = "Honey 🌸"
             _partnerProfileEmoji.value = "🦄"
+            _loveStartDate.value = ""
             
             sharedPrefs.edit().clear().apply()
             
-            // Seed defaults again
-            repository.insertProfile(UserProfile("user", "Minnyo", "🦁", dailyBudget = 80.0, monthlySavingGoal = 600.0))
-            repository.insertProfile(UserProfile("girlfriend", "Honey 🌸", "🦄", dailyBudget = 70.0, monthlySavingGoal = 550.0))
+            // Clear current database values cleanly on Thread Pool
+            withContext(Dispatchers.IO) {
+                val appDao = AppDatabase.getDatabase(getApplication()).appDao()
+                appDao.clearUserProfiles()
+                appDao.clearLearningRoadmaps()
+                appDao.clearRoadmapLessons()
+                appDao.clearLearningTasks()
+                appDao.clearExpenseEntries()
+                appDao.clearSavingTasks()
+                
+                // Seed defaults again
+                appDao.insertProfile(UserProfile("user", "Minnyo", "🦁", dailyBudget = 80.0, monthlySavingGoal = 600.0))
+                appDao.insertProfile(UserProfile("girlfriend", "Honey 🌸", "🦄", dailyBudget = 70.0, monthlySavingGoal = 550.0))
+            }
         }
     }
 
@@ -478,12 +515,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
+            triggerBackupOfActiveUser()
         }
     }
 
     fun deleteRoadmap(roadmapId: Int) {
         viewModelScope.launch {
             repository.deleteRoadmapById(roadmapId)
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -491,12 +530,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleLessonCompletion(lesson: RoadmapLesson) {
         viewModelScope.launch {
             repository.updateLesson(lesson.copy(isCompleted = !lesson.isCompleted))
+            triggerBackupOfActiveUser()
         }
     }
 
     fun deleteLesson(lessonId: Int) {
         viewModelScope.launch {
             repository.deleteLessonById(lessonId)
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -512,6 +553,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     orderIndex = orderIndex
                 )
             )
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -527,18 +569,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     minutesSpent = minutes
                 )
             )
+            triggerBackupOfActiveUser()
         }
     }
 
     fun toggleLearningTaskCompletion(task: LearningTask) {
         viewModelScope.launch {
             repository.updateLearningTask(task.copy(isCompleted = !task.isCompleted))
+            triggerBackupOfActiveUser()
         }
     }
 
     fun deleteLearningTask(taskId: Int) {
         viewModelScope.launch {
             repository.deleteLearningTaskById(taskId)
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -556,6 +601,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -563,6 +609,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deleteExpenseById(expenseId)
             com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -578,18 +625,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isCompleted = false
                 )
             )
+            triggerBackupOfActiveUser()
         }
     }
 
     fun toggleSavingTaskCompletion(task: SavingTask) {
         viewModelScope.launch {
             repository.updateSavingTask(task.copy(isCompleted = !task.isCompleted))
+            triggerBackupOfActiveUser()
         }
     }
 
     fun deleteSavingTask(id: Int) {
         viewModelScope.launch {
             repository.deleteSavingTaskById(id)
+            triggerBackupOfActiveUser()
         }
     }
 
@@ -614,7 +664,227 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return repository.getLessonsForRoadmapFlow(roadmapId)
     }
 
+    // --- Account-scoped Local Data Backup & Recovery ---
+    private fun triggerBackupOfActiveUser() {
+        val email = getActiveUserEmail()
+        if (email.isNotBlank()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                kotlinx.coroutines.delay(200) // Ensure DB operations have committed
+                backupUserData(email)
+            }
+        }
+    }
+
+    private suspend fun backupUserData(email: String) = withContext(Dispatchers.IO) {
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isEmpty()) return@withContext
+
+        try {
+            val appDao = AppDatabase.getDatabase(getApplication()).appDao()
+            val moshi = com.squareup.moshi.Moshi.Builder()
+                .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                .build()
+
+            // 1. Gather all local database states
+            val profiles = appDao.getAllProfilesFlow().first()
+            val expenses = appDao.getAllExpensesList()
+            val learningTasks = appDao.getAllLearningTasksFlow().first()
+            val savingTasks = appDao.getAllSavingTasksFlow().first()
+            val roadmaps = appDao.getAllRoadmapsFlow().first()
+            val lessons = mutableListOf<com.example.data.model.RoadmapLesson>()
+            for (roadmap in roadmaps) {
+                lessons.addAll(appDao.getLessonsForRoadmap(roadmap.id))
+            }
+
+            // 2. Serialize database structures to JSON
+            val profilesJson = moshi.adapter<List<com.example.data.model.UserProfile>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.UserProfile::class.java)
+            ).toJson(profiles)
+
+            val expensesJson = moshi.adapter<List<com.example.data.model.ExpenseEntry>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.ExpenseEntry::class.java)
+            ).toJson(expenses)
+
+            val learningTasksJson = moshi.adapter<List<com.example.data.model.LearningTask>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.LearningTask::class.java)
+            ).toJson(learningTasks)
+
+            val savingTasksJson = moshi.adapter<List<com.example.data.model.SavingTask>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.SavingTask::class.java)
+            ).toJson(savingTasks)
+
+            val roadmapsJson = moshi.adapter<List<com.example.data.model.LearningRoadmap>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.LearningRoadmap::class.java)
+            ).toJson(roadmaps)
+
+            val lessonsJson = moshi.adapter<List<com.example.data.model.RoadmapLesson>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.RoadmapLesson::class.java)
+            ).toJson(lessons)
+
+            // 3. Extract the active coupling and partner configurations
+            val isCoupled = sharedPrefs.getBoolean("is_coupled", false)
+            val partnerName = sharedPrefs.getString("partner_name", "") ?: ""
+            val partnerEmoji = sharedPrefs.getString("partner_emoji", "") ?: ""
+            val coupleCode = sharedPrefs.getString("couple_code", "") ?: ""
+            val loveStartDate = sharedPrefs.getString("love_start_date", "") ?: ""
+            val myName = sharedPrefs.getString("my_name", "") ?: ""
+            val myEmoji = sharedPrefs.getString("my_emoji", "") ?: ""
+
+            // 4. Persistence into separate local accounts preference container
+            accountsPrefs.edit()
+                .putString("data_profiles_$cleanEmail", profilesJson)
+                .putString("data_expenses_$cleanEmail", expensesJson)
+                .putString("data_learning_tasks_$cleanEmail", learningTasksJson)
+                .putString("data_saving_tasks_$cleanEmail", savingTasksJson)
+                .putString("data_roadmaps_$cleanEmail", roadmapsJson)
+                .putString("data_lessons_$cleanEmail", lessonsJson)
+                .putBoolean("cfg_is_coupled_$cleanEmail", isCoupled)
+                .putString("cfg_partner_name_$cleanEmail", partnerName)
+                .putString("cfg_partner_emoji_$cleanEmail", partnerEmoji)
+                .putString("cfg_couple_code_$cleanEmail", coupleCode)
+                .putString("cfg_love_start_date_$cleanEmail", loveStartDate)
+                .putString("cfg_my_name_$cleanEmail", myName)
+                .putString("cfg_my_emoji_$cleanEmail", myEmoji)
+                .apply()
+
+            android.util.Log.d("UserDataBackup", "Successfully backed up data locally for $cleanEmail")
+        } catch (e: Exception) {
+            android.util.Log.e("UserDataBackup", "Error executing local data backup", e)
+        }
+    }
+
+    private suspend fun restoreUserData(email: String) = withContext(Dispatchers.IO) {
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isEmpty()) return@withContext
+
+        try {
+            val appDao = AppDatabase.getDatabase(getApplication()).appDao()
+            val moshi = com.squareup.moshi.Moshi.Builder()
+                .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                .build()
+
+            // 1. Flush/clear any active/cached database tables before restoration
+            appDao.clearUserProfiles()
+            appDao.clearLearningRoadmaps()
+            appDao.clearRoadmapLessons()
+            appDao.clearLearningTasks()
+            appDao.clearExpenseEntries()
+            appDao.clearSavingTasks()
+
+            // 2. Fetch back strings from accountsPrefs
+            val profilesJson = accountsPrefs.getString("data_profiles_$cleanEmail", null)
+            val expensesJson = accountsPrefs.getString("data_expenses_$cleanEmail", null)
+            val learningTasksJson = accountsPrefs.getString("data_learning_tasks_$cleanEmail", null)
+            val savingTasksJson = accountsPrefs.getString("data_saving_tasks_$cleanEmail", null)
+            val roadmapsJson = accountsPrefs.getString("data_roadmaps_$cleanEmail", null)
+            val lessonsJson = accountsPrefs.getString("data_lessons_$cleanEmail", null)
+
+            // 3. If there is no backed-up history for this account, seed starter database configuration
+            if (profilesJson.isNullOrEmpty()) {
+                seedInitialDatabaseIfEmpty()
+            } else {
+                // Safely map and feed them back to the database
+                val profiles = moshi.adapter<List<com.example.data.model.UserProfile>>(
+                    com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.UserProfile::class.java)
+                ).fromJson(profilesJson)
+                profiles?.forEach { appDao.insertProfile(it) }
+
+                if (!expensesJson.isNullOrEmpty()) {
+                    val expenses = moshi.adapter<List<com.example.data.model.ExpenseEntry>>(
+                        com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.ExpenseEntry::class.java)
+                    ).fromJson(expensesJson)
+                    expenses?.forEach { appDao.insertExpense(it) }
+                }
+
+                if (!learningTasksJson.isNullOrEmpty()) {
+                    val learningTasks = moshi.adapter<List<com.example.data.model.LearningTask>>(
+                        com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.LearningTask::class.java)
+                    ).fromJson(learningTasksJson)
+                    learningTasks?.forEach { appDao.insertLearningTask(it) }
+                }
+
+                if (!savingTasksJson.isNullOrEmpty()) {
+                    val savingTasks = moshi.adapter<List<com.example.data.model.SavingTask>>(
+                        com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.SavingTask::class.java)
+                    ).fromJson(savingTasksJson)
+                    savingTasks?.forEach { appDao.insertSavingTask(it) }
+                }
+
+                if (!roadmapsJson.isNullOrEmpty()) {
+                    val roadmaps = moshi.adapter<List<com.example.data.model.LearningRoadmap>>(
+                        com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.LearningRoadmap::class.java)
+                    ).fromJson(roadmapsJson)
+                    roadmaps?.forEach { appDao.insertRoadmap(it) }
+                }
+
+                if (!lessonsJson.isNullOrEmpty()) {
+                    val lessons = moshi.adapter<List<com.example.data.model.RoadmapLesson>>(
+                        com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.RoadmapLesson::class.java)
+                    ).fromJson(lessonsJson)
+                    lessons?.forEach { appDao.insertLesson(it) }
+                }
+            }
+
+            // 4. Restore the companion configuration parameters into memory & SharedPrefs
+            val isCoupled = accountsPrefs.getBoolean("cfg_is_coupled_$cleanEmail", false)
+            val partnerName = accountsPrefs.getString("cfg_partner_name_$cleanEmail", "") ?: ""
+            val partnerEmoji = accountsPrefs.getString("cfg_partner_emoji_$cleanEmail", "") ?: ""
+            val coupleCode = accountsPrefs.getString("cfg_couple_code_$cleanEmail", "") ?: ""
+            val loveStartDate = accountsPrefs.getString("cfg_love_start_date_$cleanEmail", "") ?: ""
+            val myName = accountsPrefs.getString("cfg_my_name_$cleanEmail", "") ?: ""
+            val myEmoji = accountsPrefs.getString("cfg_my_emoji_$cleanEmail", "") ?: ""
+
+            // Correctly execute state Flow mutations on the main thread
+            withContext(Dispatchers.Main) {
+                _isCoupled.value = isCoupled
+                _partnerProfileName.value = if (partnerName.isNotBlank()) partnerName else "Honey 🌸"
+                _partnerProfileEmoji.value = if (partnerEmoji.isNotBlank()) partnerEmoji else "🦄"
+                _coupleCode.value = coupleCode
+                _loveStartDate.value = loveStartDate
+                if (myName.isNotBlank()) _myProfileName.value = myName
+                if (myEmoji.isNotBlank()) _myProfileEmoji.value = myEmoji
+            }
+
+            sharedPrefs.edit()
+                .putBoolean("is_coupled", isCoupled)
+                .putString("partner_name", partnerName)
+                .putString("partner_emoji", partnerEmoji)
+                .putString("couple_code", coupleCode)
+                .putString("love_start_date", loveStartDate)
+                .putString("my_name", myName)
+                .putString("my_emoji", myEmoji)
+                .apply()
+
+            android.util.Log.d("UserDataBackup", "Successfully restored data and coupling config for $cleanEmail")
+        } catch (e: Exception) {
+            android.util.Log.e("UserDataBackup", "Error executing local data recovery", e)
+        }
+    }
+
     // Seeding logic
+    private fun seedDefaultAccounts() {
+        val minnyoEmail = "minnyo.work@gmail.com"
+        val demoEmail = "demo@example.com"
+        
+        // Seed minnyo.work@gmail.com if it doesn't already exist
+        if (accountsPrefs.getString("acc_pwd_$minnyoEmail", null) == null) {
+            accountsPrefs.edit()
+                .putString("acc_pwd_$minnyoEmail", "123456".sha256())
+                .putString("acc_name_$minnyoEmail", "Minnyo")
+                .putString("acc_emoji_$minnyoEmail", "🦁")
+                .apply()
+        }
+        
+        // Seed demo@example.com if it doesn't already exist
+        if (accountsPrefs.getString("acc_pwd_$demoEmail", null) == null) {
+            accountsPrefs.edit()
+                .putString("acc_pwd_$demoEmail", "123456".sha256())
+                .putString("acc_name_$demoEmail", "DuoUser")
+                .putString("acc_emoji_$demoEmail", "🐻")
+                .apply()
+        }
+    }
+
     private suspend fun seedInitialDatabaseIfEmpty() = withContext(Dispatchers.IO) {
         val existingProfiles = repository.allProfilesFlow.first()
         if (existingProfiles.isNotEmpty()) return@withContext

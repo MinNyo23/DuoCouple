@@ -1540,6 +1540,213 @@ fun CalendarGrid(
 }
 
 
+@Composable
+fun ExpensesCalendarView(
+    selectedDate: String?,
+    expenses: List<com.example.data.model.ExpenseEntry>,
+    onDayClick: (String?) -> Unit
+) {
+    var currentYearMonth by remember {
+        val cal = Calendar.getInstance()
+        mutableStateOf(Pair(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH)))
+    }
+
+    val displayCal = Calendar.getInstance().apply {
+        set(Calendar.YEAR, currentYearMonth.first)
+        set(Calendar.MONTH, currentYearMonth.second)
+        set(Calendar.DAY_OF_MONTH, 1)
+    }
+
+    val year = currentYearMonth.first
+    val month = currentYearMonth.second
+
+    val monthName = displayCal.getDisplayName(Calendar.MONTH, Calendar.LONG, Locale.getDefault()) ?: ""
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+    val firstDayOfWeekOffset = displayCal.get(Calendar.DAY_OF_WEEK) - 1
+    val maxDaysInMonth = displayCal.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+    GlassCard(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        borderBrush = Brush.linearGradient(colors = listOf(ElectricLavender.copy(alpha = 0.3f), CosmicCyan.copy(alpha = 0.2f)))
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        val prevCal = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, year)
+                            set(Calendar.MONTH, month)
+                            add(Calendar.MONTH, -1)
+                        }
+                        currentYearMonth = Pair(prevCal.get(Calendar.YEAR), prevCal.get(Calendar.MONTH))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Prev Month", tint = Color.White)
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "$monthName $year",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    
+                    if (selectedDate != null) {
+                        IconButton(
+                            onClick = { onDayClick(null) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Clear search filter", tint = CosmicCyan, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        val nextCal = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, year)
+                            set(Calendar.MONTH, month)
+                            add(Calendar.MONTH, 1)
+                        }
+                        currentYearMonth = Pair(nextCal.get(Calendar.YEAR), nextCal.get(Calendar.MONTH))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Next Month", tint = Color.White)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa").forEach {
+                    Text(
+                        text = it,
+                        fontSize = 11.sp,
+                        color = SecondaryTextLavender,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.width(36.dp),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val dayRows = 6
+            val cols = 7
+
+            Column {
+                repeat(dayRows) { row ->
+                    var rowHasDays = false
+                    repeat(cols) { col ->
+                        val idx = row * cols + col
+                        val dayN = idx - firstDayOfWeekOffset + 1
+                        if (dayN in 1..maxDaysInMonth) {
+                            rowHasDays = true
+                        }
+                    }
+
+                    if (rowHasDays) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            repeat(cols) { col ->
+                                val index = row * cols + col
+                                val dayNum = index - firstDayOfWeekOffset + 1
+
+                                if (dayNum in 1..maxDaysInMonth) {
+                                    val cellCal = Calendar.getInstance().apply {
+                                        set(Calendar.YEAR, year)
+                                        set(Calendar.MONTH, month)
+                                        set(Calendar.DAY_OF_MONTH, dayNum)
+                                    }
+                                    val cellDateStr = sdf.format(cellCal.time)
+                                    val isSelected = selectedDate == cellDateStr
+
+                                    val dayExpenses = expenses.filter { it.dateString == cellDateStr }
+                                    val hasIncome = dayExpenses.any { it.isIncome }
+                                    val hasExpense = dayExpenses.any { !it.isIncome }
+
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .width(36.dp)
+                                            .height(44.dp)
+                                            .background(
+                                                if (isSelected) ElectricLavender.copy(alpha = 0.3f) else Color.Transparent,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .border(
+                                                width = if (isSelected) 1.dp else 0.dp,
+                                                color = if (isSelected) ElectricLavender else Color.Transparent,
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable {
+                                                if (isSelected) {
+                                                    onDayClick(null)
+                                                } else {
+                                                    onDayClick(cellDateStr)
+                                                }
+                                            }
+                                            .padding(vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = dayNum.toString(),
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.85f),
+                                            textAlign = TextAlign.Center
+                                        )
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (hasIncome) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(5.dp)
+                                                        .background(Color(0xFF81C784), CircleShape)
+                                                )
+                                            }
+                                            if (hasExpense) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(5.dp)
+                                                        .background(Color(0xFFE57373), CircleShape)
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.width(36.dp))
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 // --- 3. EXPENSES SCREEN (COUPLE CASH FLOW LEDGER) ---
 @Composable
 fun ExpensesScreen(viewModel: MainViewModel) {
@@ -1551,6 +1758,7 @@ fun ExpensesScreen(viewModel: MainViewModel) {
     var expenseIsIncome by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("Food") }
     var expenseNote by remember { mutableStateOf("") }
+    var selectedFilterDate by remember { mutableStateOf<String?>(null) }
 
     val myProfile = profiles.find { it.id == "user" }
     val gfProfile = profiles.find { it.id == "girlfriend" }
@@ -1632,6 +1840,17 @@ fun ExpensesScreen(viewModel: MainViewModel) {
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Daily Tracker Calendar
+        Text("Duo Financial Daily Calendar", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text("Visual daily spend tracking & retrospective search 📅", fontSize = 12.sp, color = SecondaryTextLavender, modifier = Modifier.padding(bottom = 6.dp))
+        ExpensesCalendarView(
+            selectedDate = selectedFilterDate,
+            expenses = expenses,
+            onDayClick = { selectedFilterDate = it }
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -1843,11 +2062,59 @@ fun ExpensesScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(16.dp))
 
         // History logs
-        Text("Duo Financial Ledger Logs", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 8.dp))
-        if (expenses.isEmpty()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Duo Financial Ledger Logs", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            if (selectedFilterDate != null) {
+                TextButton(
+                    onClick = { selectedFilterDate = null },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Text("Clear Filter ✖", fontSize = 11.sp, color = CosmicCyan, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (selectedFilterDate != null) {
+            val dayIn = expenses.filter { it.dateString == selectedFilterDate && it.isIncome }.sumOf { it.amount }
+            val dayOut = expenses.filter { it.dateString == selectedFilterDate && !it.isIncome }.sumOf { it.amount }
+            val dayNet = dayIn - dayOut
+
+            GlassCard(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                borderBrush = Brush.linearGradient(colors = listOf(CosmicCyan.copy(alpha = 0.3f), Color.Transparent))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Selected Date: $selectedFilterDate 🔍", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CosmicCyan)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Day's Revenue: $${String.format(Locale.getDefault(), "%.1f", dayIn)}", fontSize = 11.sp, color = Color(0xFF81C784))
+                        Text("Day's Cost: $${String.format(Locale.getDefault(), "%.1f", dayOut)}", fontSize = 11.sp, color = Color(0xFFE57373))
+                        Text("Net: $${String.format(Locale.getDefault(), "%.1f", dayNet)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+
+        val displayedExpenses = if (selectedFilterDate != null) {
+            expenses.filter { it.dateString == selectedFilterDate }
+        } else {
+            expenses
+        }
+
+        if (displayedExpenses.isEmpty()) {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "No cost logs yet. Entries you type or auto-presets click will stream here instantly, syncing with your partner in real time!",
+                    text = if (selectedFilterDate != null)
+                        "No cost entries logged on $selectedFilterDate. Tap on other calendar dates or click Clear Filter to view everything!"
+                        else "No cost logs yet. Entries you type or auto-presets click will stream here instantly, syncing with your partner in real time!",
                     fontSize = 12.sp,
                     color = SecondaryTextLavender,
                     textAlign = TextAlign.Center,
@@ -1855,7 +2122,7 @@ fun ExpensesScreen(viewModel: MainViewModel) {
                 )
             }
         } else {
-            expenses.forEach { log ->
+            displayedExpenses.forEach { log ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3448,6 +3715,38 @@ fun LoginScreen(viewModel: MainViewModel) {
                 fontWeight = FontWeight.Bold,
                 color = CosmicCyan
             )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        GlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            borderBrush = Brush.linearGradient(colors = listOf(ElectricLavender.copy(alpha = 0.3f), CosmicCyan.copy(alpha = 0.2f)))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = "Quick Tip",
+                        tint = CosmicCyan,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Quick Demo Access",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Rebuilding or redeploying the app in development may wipe local SharedPreferences. To resume instantly, sign in with your pre-seeded account: email minnyo.work@gmail.com (Password: 123456)!",
+                    fontSize = 11.sp,
+                    color = SecondaryTextLavender,
+                    lineHeight = 15.sp
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(60.dp))

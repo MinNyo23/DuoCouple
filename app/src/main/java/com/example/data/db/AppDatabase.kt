@@ -105,6 +105,24 @@ interface AppDao {
 
     @Query("DELETE FROM saving_tasks WHERE id = :id")
     suspend fun deleteSavingTaskById(id: Int)
+
+    @Query("DELETE FROM user_profiles")
+    suspend fun clearUserProfiles()
+
+    @Query("DELETE FROM learning_roadmaps")
+    suspend fun clearLearningRoadmaps()
+
+    @Query("DELETE FROM roadmap_lessons")
+    suspend fun clearRoadmapLessons()
+
+    @Query("DELETE FROM learning_tasks")
+    suspend fun clearLearningTasks()
+
+    @Query("DELETE FROM expense_entries")
+    suspend fun clearExpenseEntries()
+
+    @Query("DELETE FROM saving_tasks")
+    suspend fun clearSavingTasks()
 }
 
 @Database(
