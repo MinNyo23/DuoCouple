@@ -65,3 +65,12 @@ data class SavingTask(
     val isCompleted: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "calendar_tasks")
+data class CalendarTask(
+    @PrimaryKey val id: String,
+    val title: String,
+    val time: String,
+    val isCompleted: Boolean = false,
+    val timestamp: Long = System.currentTimeMillis()
+)

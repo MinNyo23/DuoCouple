@@ -8,6 +8,7 @@ import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.Path
@@ -353,25 +354,149 @@ fun GlassCard(
 ) {
     Box(
         modifier = modifier
-            .background(
-                color = GlassSurfaceDark, // Translucent frosted white backdrop
-                shape = RoundedCornerShape(20.dp)
-            )
-            .border(
-                width = 1.dp,
-                brush = borderBrush,
-                shape = RoundedCornerShape(20.dp)
+            .animateContentSize(
+                animationSpec = androidx.compose.animation.core.spring(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                )
             )
             .clip(RoundedCornerShape(20.dp))
-            .padding(16.dp)
     ) {
-        Column {
+        // Base translucent frosted backdrop
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(color = GlassSurfaceDark) 
+        )
+        // Internal decorative glassmorphic blurs
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .offset(x = (-30).dp, y = (-30).dp)
+                .size(120.dp)
+                .blur(50.dp)
+                .background(ElectricLavender.copy(alpha = 0.2f), CircleShape)
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = 30.dp, y = 30.dp)
+                .size(120.dp)
+                .blur(50.dp)
+                .background(CosmicCyan.copy(alpha = 0.2f), CircleShape)
+        )
+        // Border layer
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .border(
+                    width = 1.dp,
+                    brush = borderBrush,
+                    shape = RoundedCornerShape(20.dp)
+                )
+        )
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
             content()
         }
     }
 }
 
+@Composable
+fun ExpensesPieChart(expenses: List<com.example.data.model.ExpenseEntry>, modifier: Modifier = Modifier) {
+    val expenseEntries = expenses.filter { !it.isIncome }
+    if (expenseEntries.isEmpty()) {
+        Text("No expenses yet to visualize.", color = SecondaryTextLavender, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+        return
+    }
+
+    val grouped = expenseEntries.groupBy { it.category }
+        .mapValues { it.value.sumOf { e -> e.amount } }
+        .toList()
+        .sortedByDescending { it.second }
+
+    val total = grouped.sumOf { it.second }
+    
+    // Animate progress
+    var animationPlayed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        animationPlayed = true
+    }
+    val sweepProgress by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (animationPlayed) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 1500, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "pie_anim"
+    )
+
+    val colors = listOf(
+        CosmicCyan,
+        ElectricLavender,
+        Color(0xFFFF9800), // Orange
+        Color(0xFFE91E63), // Pink
+        Color(0xFF4CAF50), // Green
+        Color(0xFFFFC107), // Amber
+        Color(0xFFF44336), // Red
+        Color(0xFF9E9E9E)  // Grey
+    )
+
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(100.dp), contentAlignment = Alignment.Center) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                var startAngle = -90f
+                grouped.forEachIndexed { index, (_, amount) ->
+                    val sweepAngle = ((amount.toFloat() / total.toFloat()) * 360f) * sweepProgress
+                    val color = colors[index % colors.size]
+                    drawArc(
+                        color = color,
+                        startAngle = startAngle,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = 24f, cap = StrokeCap.Butt)
+                    )
+                    startAngle += sweepAngle
+                }
+            }
+            Text(
+                text = "Expenses",
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
+        Spacer(modifier = Modifier.width(24.dp))
+        
+        // Legend
+        Column(modifier = Modifier.weight(1f)) {
+            grouped.forEachIndexed { index, (category, amount) ->
+                val color = colors[index % colors.size]
+                val percentage = if (total > 0) ((amount / total) * 100).toInt() else 0
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                    Box(modifier = Modifier.size(10.dp).background(color, CircleShape))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = category,
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "$percentage%",
+                        color = SecondaryTextLavender,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
 // --- 1. DASHBOARD SCREEN (SIDE-BY-SIDE COUPLE STATUS) ---
+
 @Composable
 fun DashboardScreen(viewModel: MainViewModel) {
     val profiles by viewModel.profilesFlow.collectAsStateWithLifecycle()
@@ -379,6 +504,10 @@ fun DashboardScreen(viewModel: MainViewModel) {
     val roadmaps by viewModel.roadmapsFlow.collectAsStateWithLifecycle()
     val learningTasks by viewModel.allLearningTasksFlow.collectAsStateWithLifecycle()
     val loveStartDate by viewModel.loveStartDate.collectAsStateWithLifecycle()
+    
+    val aiAdvice by viewModel.aiAdvice.collectAsStateWithLifecycle()
+    val isLoadingAdvice by viewModel.isLoadingAdvice.collectAsStateWithLifecycle()
+    val allCalendarTasks by viewModel.allCalendarTasksFlow.collectAsStateWithLifecycle()
 
     val myProfile = profiles.find { it.id == "user" }
     val gfProfile = profiles.find { it.id == "girlfriend" }
@@ -431,11 +560,35 @@ fun DashboardScreen(viewModel: MainViewModel) {
     val mutualSavings = totalIncome - totalExpense
 
     val totalBudgetLimit = (myProfile?.dailyBudget ?: 80.0) + (gfProfile?.dailyBudget ?: 70.0)
+    
     // Filter today's spent
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     val todayStr = sdf.format(Date())
     val todayExpenses = expenses.filter { !it.isIncome && it.dateString == todayStr }
     val todaySpent = todayExpenses.sumOf { it.amount }
+
+    // Interactive Live Status States
+    var userStatusVibe by remember { mutableStateOf("Coding 🧠") }
+    var userStatusEmoji by remember { mutableStateOf("🧠") }
+    var userOnlineState by remember { mutableStateOf(true) }
+    var showUserVibePicker by remember { mutableStateOf(false) }
+
+    var gfStatusVibe by remember { mutableStateOf("Learning Jetpack Compose 📚") }
+    var gfStatusEmoji by remember { mutableStateOf("📚") }
+    var gfOnlineState by remember { mutableStateOf(true) }
+    var showGfVibePicker by remember { mutableStateOf(false) }
+
+    // Interactive Shared Calendar Tasks State
+    var showCalendarAddDialog by remember { mutableStateOf(false) }
+    var newEventTitle by remember { mutableStateOf("") }
+    var newEventTime by remember { mutableStateOf("") }
+
+    // Category Breakdowns for Expense Summaries
+    val foodSpent = remember(expenses) { expenses.filter { !it.isIncome && it.category == "Food" }.sumOf { it.amount } }
+    val shoppingSpent = remember(expenses) { expenses.filter { !it.isIncome && it.category == "Shopping" }.sumOf { it.amount } }
+    val transportSpent = remember(expenses) { expenses.filter { !it.isIncome && it.category == "Transport" }.sumOf { it.amount } }
+    val entertainmentSpent = remember(expenses) { expenses.filter { !it.isIncome && it.category == "Entertainment" }.sumOf { it.amount } }
+    val otherSpent = remember(expenses) { expenses.filter { !it.isIncome && (it.category != "Food" && it.category != "Shopping" && it.category != "Transport" && it.category != "Entertainment") }.sumOf { it.amount } }
 
     LazyColumn(
         modifier = Modifier
@@ -520,10 +673,9 @@ fun DashboardScreen(viewModel: MainViewModel) {
                     // Button to Set or Edit the date
                     IconButton(
                         onClick = {
-                            val now = Calendar.getInstance()
-                            var initYear = now.get(Calendar.YEAR)
-                            var initMonth = now.get(Calendar.MONTH)
-                            var initDay = now.get(Calendar.DAY_OF_MONTH)
+                            var initYear = Calendar.getInstance().get(Calendar.YEAR)
+                            var initMonth = Calendar.getInstance().get(Calendar.MONTH)
+                            var initDay = Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
                             
                             if (loveStartDate.isNotBlank()) {
                                 try {
@@ -663,7 +815,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = gfProfile?.avatarEmoji ?: "🦄",
+                                text = gfProfile?.avatarEmoji ?: "🌸",
                                 fontSize = 32.sp
                             )
                             Spacer(modifier = Modifier.height(4.dp))
@@ -761,7 +913,449 @@ fun DashboardScreen(viewModel: MainViewModel) {
             }
         }
 
-        // Mutual Joint Financial Hub Card
+        // --- SECTION 1: Live Status & Presence Tracking ---
+        item {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                borderBrush = Brush.linearGradient(
+                    colors = listOf(ElectricLavender.copy(alpha = 0.4f), CosmicCyan.copy(alpha = 0.4f))
+                )
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Wifi,
+                        contentDescription = "Presence Icon",
+                        tint = CosmicCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Live Co-Presence Status",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .background(CosmicCyan.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Connected",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CosmicCyan
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Minnyo Column
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(Color(0x0AFFFFFF), RoundedCornerShape(16.dp))
+                            .border(1.dp, Color(0x12FFFFFF), RoundedCornerShape(16.dp))
+                            .clickable { showUserVibePicker = !showUserVibePicker }
+                            .padding(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(text = "Me", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SecondaryTextLavender)
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        if (userOnlineState) Color(0xFF4CAF50) else Color.Gray,
+                                        CircleShape
+                                    )
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(userStatusEmoji, fontSize = 28.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text(myName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text(userStatusVibe, fontSize = 11.sp, color = SecondaryTextLavender, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Tap to update mood",
+                            fontSize = 9.sp,
+                            color = ElectricLavender,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    // Girlfriend Column
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(Color(0x0AFFFFFF), RoundedCornerShape(16.dp))
+                            .border(1.dp, Color(0x12FFFFFF), RoundedCornerShape(16.dp))
+                            .clickable { showGfVibePicker = !showGfVibePicker }
+                            .padding(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(text = "Partner", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SecondaryTextLavender)
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        if (gfOnlineState) Color(0xFF4CAF50) else Color.Gray,
+                                        CircleShape
+                                    )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(gfStatusEmoji, fontSize = 28.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text(gfName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text(gfStatusVibe, fontSize = 11.sp, color = SecondaryTextLavender, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Tap to cycle activity",
+                            fontSize = 9.sp,
+                            color = SweetheartedPeach,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                // Interactive vibe preset picker for USER
+                AnimatedVisibility(visible = showUserVibePicker) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                            .background(Color(0x08FFFFFF), RoundedCornerShape(12.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text("Set My Vibe Preset:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            val userPresets = listOf(
+                                Pair("Coding 🧠", "🧠"),
+                                Pair("Coffee Break ☕", "☕"),
+                                Pair("Chilling 🍃", "🍃"),
+                                Pair("Loving You ❤️", "❤️"),
+                                Pair("Tired & Sleeping 😴", "😴"),
+                                Pair("Exercising 🏃", "🏃")
+                            )
+                            userPresets.forEach { preset ->
+                                SuggestionChip(
+                                    onClick = {
+                                        userStatusVibe = preset.first
+                                        userStatusEmoji = preset.second
+                                        showUserVibePicker = false
+                                    },
+                                    label = { Text(preset.first, fontSize = 10.sp) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Interactive vibe cycle for Girlfriend
+                AnimatedVisibility(visible = showGfVibePicker) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                            .background(Color(0x08FFFFFF), RoundedCornerShape(12.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text("Simulate Partner Action:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            val gfPresets = listOf(
+                                Pair("Learning Compose 📚", "📚"),
+                                Pair("Shopping 🛍️", "🛍️"),
+                                Pair("Happy Hour 🎉", "🎉"),
+                                Pair("Napping 😴", "😴"),
+                                Pair("Missing You 💕", "💕"),
+                                Pair("Gym Workout 💪", "💪")
+                            )
+                            gfPresets.forEach { preset ->
+                                SuggestionChip(
+                                    onClick = {
+                                        gfStatusVibe = preset.first
+                                        gfStatusEmoji = preset.second
+                                        showGfVibePicker = false
+                                    },
+                                    label = { Text(preset.first, fontSize = 10.sp) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Connection level calculation display
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Sync, contentDescription = "Sync", tint = ElectricLavender, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Workspace Sync Level", fontSize = 11.sp, color = SecondaryTextLavender)
+                    }
+                    Text("98% Synced", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CosmicCyan)
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                var syncProgress by remember { mutableStateOf(0f) }
+                LaunchedEffect(Unit) {
+                    syncProgress = 0.98f
+                }
+                val animatedSyncProgress by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = syncProgress,
+                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 1500, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "sync_progress"
+                )
+
+                LinearProgressIndicator(
+                    progress = { animatedSyncProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = ElectricLavender,
+                    trackColor = Color(0x12FFFFFF)
+                )
+            }
+        }
+
+        // --- SECTION 2: Shared Calendar Tasks ---
+        item {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                borderBrush = Brush.linearGradient(
+                    colors = listOf(CosmicCyan.copy(alpha = 0.4f), Color.Transparent)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.DateRange,
+                            contentDescription = "Calendar List",
+                            tint = SweetheartedPeach,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Shared Couple Calendar",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val context = LocalContext.current
+                    IconButton(
+                        onClick = { com.example.utils.CsvExportUtil.exportCalendarTasksToCsv(context, allCalendarTasks) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Share,
+                            contentDescription = "Export Events to CSV",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { showCalendarAddDialog = !showCalendarAddDialog }
+                    ) {
+                        Icon(
+                            imageVector = if (showCalendarAddDialog) Icons.Filled.Close else Icons.Filled.Add,
+                            contentDescription = "Add Event Toggle",
+                            tint = CosmicCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Quick Add Calendar Event Expandable Panel
+                AnimatedVisibility(visible = showCalendarAddDialog) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .background(Color(0x08FFFFFF), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Add Shared Duo Event 📅", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        
+                        OutlinedTextField(
+                            value = newEventTitle,
+                            onValueChange = { newEventTitle = it },
+                            label = { Text("Event Title") },
+                            placeholder = { Text("e.g. Cinema Date Night 🍿") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = newEventTime,
+                            onValueChange = { newEventTime = it },
+                            label = { Text("Schedule Time / Day") },
+                            placeholder = { Text("e.g. Tonight, 8:30 PM") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        Button(
+                            onClick = {
+                                if (newEventTitle.isNotBlank() && newEventTime.isNotBlank()) {
+                                    viewModel.addCalendarTask(
+                                        title = newEventTitle.trim(),
+                                        time = newEventTime.trim()
+                                    )
+                                    newEventTitle = ""
+                                    newEventTime = ""
+                                    showCalendarAddDialog = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Schedule on Shared Calendar", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // Render Calendar Events
+                if (allCalendarTasks.isEmpty()) {
+                    Text(
+                        text = "All caught up! No scheduled couple tasks. Use the (+) button to organize your joint plans.",
+                        fontSize = 12.sp,
+                        color = SecondaryTextLavender,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp)
+                    )
+                } else {
+                    allCalendarTasks.forEach { task ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                                .background(
+                                    if (task.isCompleted) Color(0x05FFFFFF) else Color(0x0AFFFFFF),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (task.isCompleted) Color.Transparent else Color(0x08FFFFFF),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.toggleCalendarTask(task)
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (task.isCompleted) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                        contentDescription = "Toggle Event State",
+                                        tint = if (task.isCompleted) CosmicCyan else SecondaryTextLavender,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Column {
+                                    Text(
+                                        text = task.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (task.isCompleted) SecondaryTextLavender else Color.White,
+                                        textDecoration = if (task.isCompleted) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                                    )
+                                    Text(
+                                        text = task.time,
+                                        fontSize = 11.sp,
+                                        color = SecondaryTextLavender
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    viewModel.deleteCalendarTask(task)
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Delete,
+                                    contentDescription = "Delete Event",
+                                    tint = SweetheartedPeach.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- SECTION 3: Mutual Financial Hub & Expense Summaries ---
         item {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -771,71 +1365,273 @@ fun DashboardScreen(viewModel: MainViewModel) {
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Mutual Joint Savings", fontSize = 12.sp, color = SecondaryTextLavender)
+                    Column {
+                        Text("Mutual Savings Pool", fontSize = 12.sp, color = SecondaryTextLavender, fontWeight = FontWeight.Bold)
                         Text(
                             text = "$${String.format(Locale.getDefault(), "%,.2f", mutualSavings)}",
-                            fontSize = 32.sp,
+                            fontSize = 30.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = CosmicCyan
                         )
                     }
                     Box(
                         modifier = Modifier
-                            .background(Color(0x33FF6CA1), CircleShape)
-                            .padding(12.dp)
+                            .background(SweetheartedPeach.copy(alpha = 0.15f), CircleShape)
+                            .padding(10.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Filled.AccountBalanceWallet,
                             contentDescription = "Wallet Icon",
                             tint = SweetheartedPeach,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                Divider(color = Color(0x1AFFFFFF))
+                Spacer(modifier = Modifier.height(12.dp))
+                Divider(color = Color(0x14FFFFFF))
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Combined Today's Cost Limits
+                // Combined Spent Tracker Details
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
                         Text("Joint Spent Today", fontSize = 11.sp, color = SecondaryTextLavender)
-                        Text("$${String.format(Locale.getDefault(), "%.1f", todaySpent)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("$${String.format(Locale.getDefault(), "%.2f", todaySpent)}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text("Joint Daily Budget", fontSize = 11.sp, color = SecondaryTextLavender)
-                        Text("$${String.format(Locale.getDefault(), "%.1f", totalBudgetLimit)}", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = SecondaryTextLavender)
+                        Text("$${String.format(Locale.getDefault(), "%.1f", totalBudgetLimit)}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = SecondaryTextLavender)
                     }
                 }
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 val budgetFraction = if (totalBudgetLimit > 0) (todaySpent / totalBudgetLimit).toFloat() else 0f
+                val animatedBudgetFraction by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = budgetFraction.coerceIn(0f, 1f),
+                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 1000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "budget_progress"
+                )
                 LinearProgressIndicator(
-                    progress = { budgetFraction.coerceIn(0f, 1f) },
+                    progress = { animatedBudgetFraction },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp)),
                     color = if (budgetFraction > 0.9f) SweetheartedPeach else ElectricLavender,
-                    trackColor = Color(0x22FFFFFF),
+                    trackColor = Color(0x12FFFFFF),
                 )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Rich Category Expense Breakdowns (From Real Data)
+                Text("Category Spending Breakdown", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val totalCategorySpent = (foodSpent + shoppingSpent + transportSpent + entertainmentSpent + otherSpent).coerceAtLeast(1.0)
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Category: Food
+                    CategoryProgressRow(
+                        title = "Food & Dining 🍔",
+                        amount = foodSpent,
+                        percentage = (foodSpent / totalCategorySpent * 100).toInt(),
+                        color = ElectricLavender
+                    )
+
+                    // Category: Shopping
+                    CategoryProgressRow(
+                        title = "Shopping & Clothing 🛍️",
+                        amount = shoppingSpent,
+                        percentage = (shoppingSpent / totalCategorySpent * 100).toInt(),
+                        color = CosmicCyan
+                    )
+
+                    // Category: Transport
+                    CategoryProgressRow(
+                        title = "Transport & Travel 🚗",
+                        amount = transportSpent,
+                        percentage = (transportSpent / totalCategorySpent * 100).toInt(),
+                        color = SweetheartedPeach
+                    )
+
+                    // Category: Entertainment
+                    CategoryProgressRow(
+                        title = "Fun & Entertainment 🍿",
+                        amount = entertainmentSpent,
+                        percentage = (entertainmentSpent / totalCategorySpent * 100).toInt(),
+                        color = Color(0xFFFFB74D)
+                    )
+
+                    // Category: Other
+                    CategoryProgressRow(
+                        title = "Utilities & Other 📝",
+                        amount = otherSpent,
+                        percentage = (otherSpent / totalCategorySpent * 100).toInt(),
+                        color = SecondaryTextLavender
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = Color(0x14FFFFFF))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Real-time Recent Expenses Log preview
+                Text("Recent Shared Logs", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val recentExpensesList = expenses.filter { !it.isIncome }.takeLast(3).reversed()
+                if (recentExpensesList.isEmpty()) {
+                    Text(
+                        text = "No recorded shared expenses yet! Head to the Expenses tab to insert one.",
+                        fontSize = 11.sp,
+                        color = SecondaryTextLavender,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                } else {
+                    recentExpensesList.forEach { entry ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (entry.ownerId == "user") ElectricLavender.copy(alpha = 0.15f)
+                                            else SweetheartedPeach.copy(alpha = 0.15f),
+                                            CircleShape
+                                        )
+                                        .padding(6.dp)
+                                ) {
+                                    Text(text = if (entry.ownerId == "user") "🦁" else "🌸", fontSize = 12.sp)
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = if (entry.note.isNotBlank()) entry.note else entry.category,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${entry.category} • ${entry.dateString}",
+                                        fontSize = 10.sp,
+                                        color = SecondaryTextLavender
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "-$${String.format(Locale.getDefault(), "%.2f", entry.amount)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = SweetheartedPeach
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        // Side-by-Side Live Partner Profiles
+        // --- SECTION 4: AI Savings Advisor ---
+        item {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                borderBrush = Brush.linearGradient(
+                    colors = listOf(CosmicCyan.copy(alpha = 0.4f), ElectricLavender.copy(alpha = 0.4f))
+                )
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = "AI Sparkle",
+                            tint = CosmicCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Gemini Savings Advisor",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    Button(
+                        onClick = { viewModel.fetchAISavingsAdvice() },
+                        colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isLoadingAdvice
+                    ) {
+                        Text(if (isLoadingAdvice) "Analyzing..." else "Analyze ✨", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // --- Animated Expenses Pie Chart ---
+                ExpensesPieChart(expenses = expenses, modifier = Modifier.padding(bottom = 16.dp))
+                
+                androidx.compose.animation.AnimatedContent(
+                    targetState = isLoadingAdvice to aiAdvice,
+                    label = "ai_advisor_content",
+                    transitionSpec = {
+                        androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(500)) togetherWith 
+                        androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(500))
+                    }
+                ) { (loading, advice) ->
+                    if (loading) {
+                        Box(modifier = Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = CosmicCyan, modifier = Modifier.size(24.dp))
+                        }
+                    } else if (advice.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
+                                .border(1.dp, Color(0x12FFFFFF), RoundedCornerShape(12.dp))
+                                .padding(14.dp)
+                        ) {
+                            Text(
+                                text = advice,
+                                fontSize = 13.sp,
+                                color = Color.White,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "Tap 'Analyze ✨' to get personalized AI advice on your recent spending habits.",
+                            fontSize = 12.sp,
+                            color = SecondaryTextLavender,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Side-by-Side Partner Info Summary
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Minnyo (Boyfriend) Column
+                // Boyfriend Column
                 Box(modifier = Modifier.weight(1f)) {
                     PartnerColumnCard(
                         name = myName,
@@ -865,7 +1661,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
             }
         }
 
-        // Combined Learning Progress Checklist
+        // Real-Time Learning Task Progress
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -892,7 +1688,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
                 val todayTasks = learningTasks.filter { it.dateString == todayStr }
                 if (todayTasks.isEmpty()) {
                     Text(
-                        text = "No learning tasks designed for today yet! Pop over to the Learning tab to schedule customized study. 📚",
+                        text = "No learning tasks designed for today yet! Pop over to the Learning tab to schedule study.",
                         fontSize = 12.sp,
                         color = SecondaryTextLavender,
                         textAlign = TextAlign.Center,
@@ -948,6 +1744,46 @@ fun DashboardScreen(viewModel: MainViewModel) {
             }
         }
         item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+fun CategoryProgressRow(
+    title: String,
+    amount: Double,
+    percentage: Int,
+    color: Color
+) {
+    val animatedProgress by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = (percentage / 100f).coerceIn(0f, 1f),
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 1000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "progress_anim"
+    )
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, fontSize = 11.sp, color = SecondaryTextLavender)
+            Text(
+                text = "$${String.format(Locale.getDefault(), "%.1f", amount)} (${percentage}%)",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        LinearProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
+            color = color,
+            trackColor = Color(0x0AFFFFFF)
+        )
     }
 }
 
@@ -1453,88 +2289,99 @@ fun CalendarGrid(
         Spacer(modifier = Modifier.height(8.dp))
 
         // Days Grid mapping
-        val dayRows = 5
+        val dayRows = 6
         val cols = 7
 
         repeat(dayRows) { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                repeat(cols) { col ->
-                    val index = row * cols + col
-                    val dayNum = index - dayOfWeekOffset + 1
-
-                    if (dayNum in 1..maxDaysInMonth) {
-                        val cellCal = Calendar.getInstance().apply {
-                            set(Calendar.YEAR, currentYear)
-                            set(Calendar.MONTH, currentMonth)
-                            set(Calendar.DAY_OF_MONTH, dayNum)
-                        }
-                        val cellDateStr = sdf.format(cellCal.time)
-                        val isSelected = selectedDate == cellDateStr
-
-                        // Find tasks completed on this date
-                        val dayTasks = learningTasks.filter { it.dateString == cellDateStr }
-                        val hasUserTask = dayTasks.any { it.ownerId == "user" && it.isCompleted }
-                        val hasGfTask = dayTasks.any { it.ownerId == "girlfriend" && it.isCompleted }
-
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .width(36.dp)
-                                .height(46.dp)
-                                .background(
-                                    if (isSelected) ElectricLavender.copy(alpha = 0.3f) else Color.Transparent,
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .border(
-                                    width = if (isSelected) 1.dp else 0.dp,
-                                    color = if (isSelected) ElectricLavender else Color.Transparent,
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .clickable { onDayClick(cellDateStr) }
-                                .padding(vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = dayNum.toString(),
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.85f),
-                                textAlign = TextAlign.Center
-                            )
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            // Draw dots underneath cell numbers
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (hasUserTask) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(5.dp)
-                                            .background(ElectricLavender, CircleShape)
-                                    )
-                                }
-                                if (hasGfTask) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(5.dp)
-                                            .background(SweetheartedPeach, CircleShape)
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        // Empty spacer cell
-                        Spacer(modifier = Modifier.width(36.dp))
-                    }
+            var rowHasDays = false
+            repeat(cols) { col ->
+                val idx = row * cols + col
+                val dayN = idx - dayOfWeekOffset + 1
+                if (dayN in 1..maxDaysInMonth) {
+                    rowHasDays = true
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+
+            if (rowHasDays) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(cols) { col ->
+                        val index = row * cols + col
+                        val dayNum = index - dayOfWeekOffset + 1
+
+                        if (dayNum in 1..maxDaysInMonth) {
+                            val cellCal = Calendar.getInstance().apply {
+                                set(Calendar.YEAR, currentYear)
+                                set(Calendar.MONTH, currentMonth)
+                                set(Calendar.DAY_OF_MONTH, dayNum)
+                            }
+                            val cellDateStr = sdf.format(cellCal.time)
+                            val isSelected = selectedDate == cellDateStr
+
+                            // Find tasks completed on this date
+                            val dayTasks = learningTasks.filter { it.dateString == cellDateStr }
+                            val hasUserTask = dayTasks.any { it.ownerId == "user" && it.isCompleted }
+                            val hasGfTask = dayTasks.any { it.ownerId == "girlfriend" && it.isCompleted }
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .width(36.dp)
+                                    .height(46.dp)
+                                    .background(
+                                        if (isSelected) ElectricLavender.copy(alpha = 0.3f) else Color.Transparent,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .border(
+                                        width = if (isSelected) 1.dp else 0.dp,
+                                        color = if (isSelected) ElectricLavender else Color.Transparent,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { onDayClick(cellDateStr) }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = dayNum.toString(),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.85f),
+                                    textAlign = TextAlign.Center
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // Draw dots underneath cell numbers
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (hasUserTask) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .background(ElectricLavender, CircleShape)
+                                        )
+                                    }
+                                    if (hasGfTask) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .background(SweetheartedPeach, CircleShape)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            // Empty spacer cell
+                            Spacer(modifier = Modifier.width(36.dp))
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+            }
         }
     }
 }
@@ -1774,6 +2621,7 @@ fun ExpensesScreen(viewModel: MainViewModel) {
     val combinedSavings = totalIn - totalOut
 
     val keyboardController = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -1784,9 +2632,17 @@ fun ExpensesScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(16.dp))
 
         // Ledger Title
-        Column {
-            Text("Mutual Expense Checker", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("Unified log for budgets and saving goals • Transparent 💖", fontSize = 13.sp, color = SecondaryTextLavender)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("Mutual Expense Checker", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Unified log for budgets and saving goals • Transparent 💖", fontSize = 13.sp, color = SecondaryTextLavender)
+            }
+            IconButton(
+                onClick = { com.example.utils.CsvExportUtil.exportExpensesToCsv(context, expenses) },
+                modifier = Modifier.background(Color(0x2AFFFFFF), CircleShape)
+            ) {
+                Icon(Icons.Filled.Share, contentDescription = "Export CSV", tint = Color.White)
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -2518,6 +3374,8 @@ fun ProfilesScreen(viewModel: MainViewModel) {
     var isSqlExpanded by remember { mutableStateOf(false) }
     var showAdminPortal by remember { mutableStateOf(false) }
     val syncState by viewModel.supabaseSyncState.collectAsStateWithLifecycle()
+    val customGeminiApiKeyFlow by viewModel.customGeminiApiKey.collectAsStateWithLifecycle()
+    var customGeminiKey by remember(customGeminiApiKeyFlow) { mutableStateOf(customGeminiApiKeyFlow) }
     val scope = rememberCoroutineScope()
 
     // Synchronize initial values once profiles load
@@ -3104,6 +3962,14 @@ fun ProfilesScreen(viewModel: MainViewModel) {
                                 timestamp BIGINT NOT NULL
                             );
 
+                            CREATE TABLE IF NOT EXISTS calendar_tasks (
+                                id TEXT PRIMARY KEY,
+                                title TEXT NOT NULL,
+                                time TEXT NOT NULL,
+                                isCompleted BOOLEAN NOT NULL DEFAULT false,
+                                timestamp BIGINT NOT NULL
+                            );
+
                             CREATE TABLE IF NOT EXISTS user_accounts (
                                 email TEXT PRIMARY KEY,
                                 pwd_hash TEXT NOT NULL,
@@ -3125,6 +3991,77 @@ fun ProfilesScreen(viewModel: MainViewModel) {
                         fontSize = 10.sp,
                         color = SecondaryTextLavender
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Gemini AI Assistant Key Configuration
+        Text("Gemini AI Assistant Key 🧠", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 6.dp))
+        GlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            borderBrush = Brush.linearGradient(colors = listOf(ElectricLavender.copy(alpha = 0.5f), Color.Transparent))
+        ) {
+            Text(
+                text = "Gemini API Client Configuration",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = ElectricLavender,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = "Because you are using a custom built APK, the AI assistant runs directly on your device. To enable real-time predictions, paste your personal Google Gemini API Key here. Your key is stored strictly locally in your private secure preferences.",
+                fontSize = 11.sp,
+                color = SecondaryTextLavender,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            OutlinedTextField(
+                value = customGeminiKey,
+                onValueChange = { customGeminiKey = it },
+                label = { Text("Gemini API Key") },
+                placeholder = { Text("AIzaSy...") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = ElectricLavender,
+                    unfocusedBorderColor = Color(0x1FFFFFFF)
+                ),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Save Button
+                Button(
+                    onClick = {
+                        viewModel.saveGeminiApiKey(customGeminiKey)
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricLavender)
+                ) {
+                    Text("Save API Key", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+
+                // Clear Button
+                Button(
+                    onClick = {
+                        viewModel.clearGeminiApiKey()
+                        customGeminiKey = ""
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x1AFFFFFF))
+                ) {
+                    Text("Clear", color = Color.White)
                 }
             }
         }
@@ -3286,8 +4223,13 @@ fun RoadmapCard(roadmap: LearningRoadmap, viewModel: MainViewModel) {
             Text("${(milestonePercent * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CosmicCyan)
         }
         Spacer(modifier = Modifier.height(4.dp))
+        val animatedMilestonePercent by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = milestonePercent,
+            animationSpec = androidx.compose.animation.core.tween(durationMillis = 1000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            label = "milestone_progress"
+        )
         LinearProgressIndicator(
-            progress = { milestonePercent },
+            progress = { animatedMilestonePercent },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(6.dp)
@@ -4957,7 +5899,7 @@ fun LiveStatsTab(telemetries: List<Map<String, Any>>) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(liveCpuPercent / 100f)
+                            .fillMaxWidth((liveCpuPercent / 100f).coerceIn(0f, 1f))
                             .fillMaxHeight()
                             .background(SweetheartedPeach, CircleShape)
                     )
@@ -4990,7 +5932,7 @@ fun LiveStatsTab(telemetries: List<Map<String, Any>>) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(usedRamFraction.toFloat())
+                            .fillMaxWidth(usedRamFraction.toFloat().coerceIn(0f, 1f))
                             .fillMaxHeight()
                             .background(CosmicCyan, CircleShape)
                     )

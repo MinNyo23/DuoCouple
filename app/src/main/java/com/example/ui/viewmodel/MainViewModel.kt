@@ -10,6 +10,7 @@ import com.example.data.model.RoadmapLesson
 import com.example.data.model.LearningTask
 import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
+import com.example.data.model.CalendarTask
 import com.example.data.repository.AppRepository
 import com.example.data.remote.SupabaseSyncManager
 import com.example.data.remote.SupabaseSyncState
@@ -71,6 +72,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val roadmapsFlow: StateFlow<List<LearningRoadmap>>
     val allSavingTasksFlow: StateFlow<List<SavingTask>>
     val allLearningTasksFlow: StateFlow<List<LearningTask>>
+    val allCalendarTasksFlow: StateFlow<List<CalendarTask>>
 
     // --- UI Controls ---
     private val _selectedTab = MutableStateFlow(0) // 0: Dashboard, 1: Learning & Calendar, 2: Monthly Expenses, 3: Saving Advisor, 4: Profiles
@@ -85,6 +87,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isLoadingAdvice = MutableStateFlow(false)
     val isLoadingAdvice: StateFlow<Boolean> = _isLoadingAdvice.asStateFlow()
+
+    private val _customGeminiApiKey = MutableStateFlow(sharedPrefs.getString("custom_gemini_api_key", "") ?: "")
+    val customGeminiApiKey: StateFlow<String> = _customGeminiApiKey.asStateFlow()
 
     // --- Active User Selected (For adding individual items on the UI) ---
     private val _activeUserContext = MutableStateFlow("user") // "user" or "girlfriend"
@@ -130,9 +135,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+        allCalendarTasksFlow = repository.allCalendarTasksFlow.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
         // Seed data on cold start if database is empty
         viewModelScope.launch {
             seedDefaultAccounts()
+            supabaseSyncManager.forcePullFromSupabase()
             seedInitialDatabaseIfEmpty()
             startTelemetryLoop()
             // Keep the loading screen active for 2 seconds to showcase the modern logo and background transition
@@ -140,6 +152,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isAppLoading.value = false
         }
     }
+
 
     fun selectTab(index: Int) {
         _selectedTab.value = index
@@ -162,6 +175,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearSupabaseCredentials() {
         supabaseSyncManager.clearCredentials()
+    }
+
+    fun saveGeminiApiKey(key: String) {
+        _customGeminiApiKey.value = key
+        sharedPrefs.edit().putString("custom_gemini_api_key", key).apply()
+        triggerBackupOfActiveUser()
+    }
+
+    fun clearGeminiApiKey() {
+        _customGeminiApiKey.value = ""
+        sharedPrefs.edit().remove("custom_gemini_api_key").apply()
+        triggerBackupOfActiveUser()
     }
 
     fun isSupabaseConfigured(): Boolean {
@@ -189,6 +214,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Database Mutations ---
+
+    // Calendar Tasks
+    fun addCalendarTask(title: String, time: String) {
+        viewModelScope.launch {
+            val task = CalendarTask(
+                id = java.util.UUID.randomUUID().toString(),
+                title = title,
+                time = time
+            )
+            repository.insertCalendarTask(task)
+            triggerSupabasePush()
+        triggerSupabasePush()
+            triggerSupabasePush()
+        }
+    }
+
+    fun toggleCalendarTask(task: CalendarTask) {
+        viewModelScope.launch {
+            repository.updateCalendarTask(task.copy(isCompleted = !task.isCompleted))
+            triggerSupabasePush()
+            triggerSupabasePush()
+        }
+    }
+
+    fun deleteCalendarTask(task: CalendarTask) {
+        viewModelScope.launch {
+            repository.deleteCalendarTaskById(task.id)
+            triggerSupabasePush()
+            triggerSupabasePush()
+        }
+    }
 
     // Profiles
     fun updateProfile(id: String, name: String, avatar: String, dailyBudget: Double, monthlySavingGoal: Double) {
@@ -453,6 +509,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _loveStartDate.value = dateStr
         sharedPrefs.edit().putString("love_start_date", dateStr).apply()
         com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
+            triggerSupabasePush()
         triggerBackupOfActiveUser()
     }
 
@@ -522,6 +579,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteRoadmap(roadmapId: Int) {
         viewModelScope.launch {
             repository.deleteRoadmapById(roadmapId)
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -530,6 +588,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleLessonCompletion(lesson: RoadmapLesson) {
         viewModelScope.launch {
             repository.updateLesson(lesson.copy(isCompleted = !lesson.isCompleted))
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -537,6 +596,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteLesson(lessonId: Int) {
         viewModelScope.launch {
             repository.deleteLessonById(lessonId)
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -576,6 +636,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleLearningTaskCompletion(task: LearningTask) {
         viewModelScope.launch {
             repository.updateLearningTask(task.copy(isCompleted = !task.isCompleted))
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -583,6 +644,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteLearningTask(taskId: Int) {
         viewModelScope.launch {
             repository.deleteLearningTaskById(taskId)
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -601,6 +663,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -608,7 +671,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteExpense(expenseId: Int) {
         viewModelScope.launch {
             repository.deleteExpenseById(expenseId)
+            triggerSupabasePush()
             com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -632,6 +697,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleSavingTaskCompletion(task: SavingTask) {
         viewModelScope.launch {
             repository.updateSavingTask(task.copy(isCompleted = !task.isCompleted))
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -639,6 +705,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteSavingTask(id: Int) {
         viewModelScope.launch {
             repository.deleteSavingTaskById(id)
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -650,7 +717,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val profiles = profilesFlow.value
                 val expenses = allExpensesFlow.value
-                val advice = GeminiService.getDualSavingsAdvice(profiles, expenses)
+                val advice = GeminiService.getDualSavingsAdvice(profiles, expenses, _customGeminiApiKey.value)
                 _aiAdvice.value = advice
             } catch (e: Exception) {
                 _aiAdvice.value = "Failed to connect to savings advisor: ${e.localizedMessage}. Check your internet connection."
@@ -931,6 +998,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.insertSavingTask(SavingTask(ownerId = "shared", title = "Cook dinner together at home", rewardAmount = 25.0, dateString = todayStr, isCompleted = false))
         repository.insertSavingTask(SavingTask(ownerId = "user", title = "Carpooled to work", rewardAmount = 10.0, dateString = todayStr, isCompleted = false))
         repository.insertSavingTask(SavingTask(ownerId = "girlfriend", title = "Unsubscribe unused streaming app", rewardAmount = 15.0, dateString = todayStr, isCompleted = false))
+        supabaseSyncManager.forcePushToSupabase()
     }
 
     // --- Admin Portal Telemetry Engine & Helpers ---

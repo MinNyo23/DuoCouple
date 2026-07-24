@@ -28,11 +28,12 @@ object GeminiService {
      */
     suspend fun getDualSavingsAdvice(
         profiles: List<UserProfile>,
-        recentExpenses: List<ExpenseEntry>
+        recentExpenses: List<ExpenseEntry>,
+        customApiKey: String? = null
     ): String = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
+        val apiKey = if (!customApiKey.isNullOrBlank()) customApiKey.trim() else BuildConfig.GEMINI_API_KEY
         if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext "AI Advisory is ready! Please enter your real Google Gemini API Key in the AI Studio Secrets panel to enable real-time predictions."
+            return@withContext "AI Advisory setup needed! Feel free to enter your personal Google Gemini API Key under the Profile & Settings menu to unlock instant custom savings coaching."
         }
 
         val myProfile = profiles.find { it.id == "user" }

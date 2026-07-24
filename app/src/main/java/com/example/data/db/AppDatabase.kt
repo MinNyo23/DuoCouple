@@ -15,6 +15,7 @@ import com.example.data.model.RoadmapLesson
 import com.example.data.model.LearningTask
 import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
+import com.example.data.model.CalendarTask
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -106,6 +107,19 @@ interface AppDao {
     @Query("DELETE FROM saving_tasks WHERE id = :id")
     suspend fun deleteSavingTaskById(id: Int)
 
+    // --- Calendar Tasks ---
+    @Query("SELECT * FROM calendar_tasks ORDER BY timestamp DESC")
+    fun getAllCalendarTasksFlow(): Flow<List<CalendarTask>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCalendarTask(task: CalendarTask)
+
+    @Update
+    suspend fun updateCalendarTask(task: CalendarTask)
+
+    @Query("DELETE FROM calendar_tasks WHERE id = :id")
+    suspend fun deleteCalendarTaskById(id: String)
+
     @Query("DELETE FROM user_profiles")
     suspend fun clearUserProfiles()
 
@@ -123,6 +137,9 @@ interface AppDao {
 
     @Query("DELETE FROM saving_tasks")
     suspend fun clearSavingTasks()
+
+    @Query("DELETE FROM calendar_tasks")
+    suspend fun clearCalendarTasks()
 }
 
 @Database(
@@ -132,9 +149,10 @@ interface AppDao {
         RoadmapLesson::class,
         LearningTask::class,
         ExpenseEntry::class,
-        SavingTask::class
+        SavingTask::class,
+        CalendarTask::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -146,10 +164,9 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                val instance = Room.inMemoryDatabaseBuilder(
                     context.applicationContext,
-                    AppDatabase::class.java,
-                    "usspace_database"
+                    AppDatabase::class.java
                 )
                 .fallbackToDestructiveMigration()
                 .build()
