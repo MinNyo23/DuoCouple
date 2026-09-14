@@ -2,6 +2,8 @@
 
 DuoCouple is a native Android application built with Kotlin, Jetpack Compose, Room, and direct Supabase REST access. The Android application itself does **not** require Vercel hosting. Supabase provides the remote database/API; Vercel is only needed if a separate web dashboard or server-side API is added later.
 
+The active Supabase project for this branch is `xmikjxgzxbdmfjxiqanx` at `https://xmikjxgzxbdmfjxiqanx.supabase.co`. The publishable key belongs in a local ignored `.env` file or in the app connection settings; it is intentionally not committed to GitHub.
+
 ## Safety changes in this branch
 
 The local Room database now persists to `duo_couple.db` instead of using an in-memory database. Supabase credentials are no longer hardcoded in the APK source, placeholder credentials are rejected, and the push-sync path no longer deletes every row in the remote tables before uploading.
@@ -10,8 +12,8 @@ If the old repository version was ever built or distributed, rotate the exposed 
 
 ## Configure Supabase
 
-1. Create or select the Supabase project.
-2. Run the table definitions in [`supabase/schema.sql`](supabase/schema.sql).
+1. Open the [new Supabase project dashboard](https://supabase.com/dashboard/project/xmikjxgzxbdmfjxiqanx).
+2. Run the table definitions in [`supabase/schema.sql`](supabase/schema.sql) from the authenticated Supabase SQL Editor. A publishable key can read/write data only when matching RLS policies exist; it cannot create tables.
 3. Configure authentication and Row Level Security policies before production use. The current Android code does not yet establish a Supabase Auth session, so do not enable broad anonymous read/write policies for real user data.
 4. Copy `.env.example` to `.env` locally and set `SUPABASE_URL` plus the publishable/anon key. `.env` is ignored by Git.
 5. Alternatively, users can enter the project URL and publishable/anon key in the app's connection settings.
