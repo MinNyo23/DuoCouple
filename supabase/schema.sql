@@ -71,6 +71,7 @@ create table if not exists public.calendar_tasks (
 create table if not exists public.user_accounts (
   email text primary key,
   name text,
+  emoji text,
   created_at timestamptz not null default now()
 );
 

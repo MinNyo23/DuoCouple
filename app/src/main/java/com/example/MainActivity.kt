@@ -3972,7 +3972,6 @@ fun ProfilesScreen(viewModel: MainViewModel) {
 
                             CREATE TABLE IF NOT EXISTS user_accounts (
                                 email TEXT PRIMARY KEY,
-                                pwd_hash TEXT NOT NULL,
                                 name TEXT NOT NULL,
                                 emoji TEXT NOT NULL,
                                 created_at TIMESTAMP DEFAULT now()
@@ -4683,7 +4682,7 @@ fun LoginScreen(viewModel: MainViewModel) {
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Rebuilding or redeploying the app in development may wipe local SharedPreferences. To resume instantly, sign in with your pre-seeded account: email minnyo.work@gmail.com (Password: 123456)!",
+                    text = "For development builds, use a test account that you create yourself. Never share passwords or place demo credentials in the app.",
                     fontSize = 11.sp,
                     color = SecondaryTextLavender,
                     lineHeight = 15.sp
@@ -4818,7 +4817,7 @@ fun LoginScreen(viewModel: MainViewModel) {
                             value = forgotCodeInput,
                             onValueChange = { forgotCodeInput = it; forgotError = null },
                             label = { Text("6-Digit Verification Code") },
-                            placeholder = { Text("e.g. 123456") },
+                            placeholder = { Text("e.g. 000000") },
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
@@ -6095,7 +6094,7 @@ fun WebIntegrationTab() {
         Text("External Web Browser Integration 🌐", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
 
         Text(
-            "Since the backend relies fully on your PostgreSQL Supabase container, you can check user login status, account passwords, and CPU performance telemetry directly from any Web Browser:",
+            "Use the Supabase dashboard only for authorized administration. Sensitive account and device data must be protected by Supabase Auth, Row Level Security, and least-privilege access:",
             fontSize = 11.sp,
             color = SecondaryTextLavender
         )
@@ -6103,8 +6102,8 @@ fun WebIntegrationTab() {
         val steps = listOf(
             Pair("Step 1", "Access your Supabase dashboard at https://supabase.com/dashboard"),
             Pair("Step 2", "Open the Table Editor from the left project panel layout."),
-            Pair("Step 3", "Select the 'user_accounts' table to search user credential emails, names, matched avatars, and sha256 password hash codes!"),
-            Pair("Step 4", "Select the 'device_status_telemetry' table to view realtime device ID codes, manufacturer names, CPU usage, RAM levels, and connection heartbeat timestamps!")
+            Pair("Step 3", "Do not store or inspect application passwords in a custom table. Use Supabase Auth for authentication and keep credentials out of application data tables."),
+            Pair("Step 4", "Restrict device telemetry to authorized administrators with RLS or a protected server function; do not expose it through unrestricted browser code.")
         )
 
         steps.forEach { step ->
@@ -6135,7 +6134,7 @@ fun WebIntegrationTab() {
             color = Color.White
         )
         Text(
-            "Because telemetry and user accounts are standard database mappings, building a custom HTML live dashboard is simple! By importing Supabase's JavaScript SDK, you can subscribe to real-time additions to 'device_status_telemetry' and 'user_accounts' on any website without writing a single line of backend server architecture!",
+            "A future dashboard must use a server-side or authenticated Supabase client and must enforce the same ownership and administrator policies as the Android app.",
             fontSize = 11.sp,
             color = SecondaryTextLavender
         )

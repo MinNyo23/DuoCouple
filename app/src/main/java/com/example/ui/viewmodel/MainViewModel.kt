@@ -273,6 +273,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .putString("partner_emoji", avatar)
                     .apply()
             }
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -324,7 +325,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Save to backend database
         if (supabaseSyncManager.isConfigured()) {
-            supabaseSyncManager.registerAccountOnBackend(cleanEmail, hashedPassword, name.trim(), emoji)
+            supabaseSyncManager.registerAccountOnBackend(cleanEmail, name.trim(), emoji)
         }
 
         // Generate couple code automatically right after creating account!
@@ -346,29 +347,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val hashedPassword = password.sha256()
 
-        // If not found locally, query backend
-        if (registeredPwd == null && supabaseSyncManager.isConfigured()) {
-            val remote = supabaseSyncManager.fetchAccountFromBackend(cleanEmail)
-            if (remote != null) {
-                val remotePwd = remote["pwd_hash"]
-                val remoteName = remote["name"] ?: "User"
-                val remoteEmoji = remote["emoji"] ?: "🦁"
-                if (remotePwd != null) {
-                    registeredPwd = remotePwd
-                    name = remoteName
-                    emoji = remoteEmoji
-                    // Backport to local storage for offline use
-                    accountsPrefs.edit()
-                        .putString("acc_pwd_$cleanEmail", remotePwd)
-                        .putString("acc_name_$cleanEmail", remoteName)
-                        .putString("acc_emoji_$cleanEmail", remoteEmoji)
-                        .apply()
-                }
-            }
-        }
-
         if (registeredPwd == null) {
-            return "Account not found. Select 'Create Account' to register."
+            return "No local account found. Supabase Auth integration is required for cross-device sign-in."
         }
 
         if (registeredPwd != hashedPassword && registeredPwd != password) {
@@ -379,7 +359,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (registeredPwd == password) {
             accountsPrefs.edit().putString("acc_pwd_$cleanEmail", hashedPassword).apply()
             if (supabaseSyncManager.isConfigured()) {
-                supabaseSyncManager.registerAccountOnBackend(cleanEmail, hashedPassword, name ?: "User", emoji ?: "🦁")
+                supabaseSyncManager.registerAccountOnBackend(cleanEmail, name ?: "User", emoji ?: "🦁")
             }
         }
 
@@ -415,12 +395,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (supabaseSyncManager.isConfigured()) {
             val remote = supabaseSyncManager.fetchAccountFromBackend(cleanEmail)
             if (remote != null) {
-                // Pre-populate to local storage for future reference
-                val remotePwd = remote["pwd_hash"] ?: ""
                 val remoteName = remote["name"] ?: "User"
                 val remoteEmoji = remote["emoji"] ?: "🦁"
                 accountsPrefs.edit()
-                    .putString("acc_pwd_$cleanEmail", remotePwd)
                     .putString("acc_name_$cleanEmail", remoteName)
                     .putString("acc_emoji_$cleanEmail", remoteEmoji)
                     .apply()
@@ -442,9 +419,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putString("acc_pwd_$cleanEmail", hashedPassword)
             .apply()
             
-        if (supabaseSyncManager.isConfigured()) {
-            return@withContext supabaseSyncManager.registerAccountOnBackend(cleanEmail, hashedPassword, name, emoji)
-        }
         true
     }
 
@@ -540,6 +514,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 appDao.clearLearningTasks()
                 appDao.clearExpenseEntries()
                 appDao.clearSavingTasks()
+                appDao.clearCalendarTasks()
                 
                 // Seed defaults again
                 appDao.insertProfile(UserProfile("user", "Minnyo", "🦁", dailyBudget = 80.0, monthlySavingGoal = 600.0))
@@ -572,6 +547,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -613,6 +589,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     orderIndex = orderIndex
                 )
             )
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -629,6 +606,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     minutesSpent = minutes
                 )
             )
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -673,7 +651,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.deleteExpenseById(expenseId)
             triggerSupabasePush()
             com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
-            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -690,6 +667,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isCompleted = false
                 )
             )
+            triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
     }
@@ -757,6 +735,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val expenses = appDao.getAllExpensesList()
             val learningTasks = appDao.getAllLearningTasksFlow().first()
             val savingTasks = appDao.getAllSavingTasksFlow().first()
+            val calendarTasks = appDao.getAllCalendarTasksFlow().first()
             val roadmaps = appDao.getAllRoadmapsFlow().first()
             val lessons = mutableListOf<com.example.data.model.RoadmapLesson>()
             for (roadmap in roadmaps) {
@@ -779,6 +758,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val savingTasksJson = moshi.adapter<List<com.example.data.model.SavingTask>>(
                 com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.SavingTask::class.java)
             ).toJson(savingTasks)
+
+            val calendarTasksJson = moshi.adapter<List<com.example.data.model.CalendarTask>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.CalendarTask::class.java)
+            ).toJson(calendarTasks)
 
             val roadmapsJson = moshi.adapter<List<com.example.data.model.LearningRoadmap>>(
                 com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.LearningRoadmap::class.java)
@@ -803,6 +786,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putString("data_expenses_$cleanEmail", expensesJson)
                 .putString("data_learning_tasks_$cleanEmail", learningTasksJson)
                 .putString("data_saving_tasks_$cleanEmail", savingTasksJson)
+                .putString("data_calendar_tasks_$cleanEmail", calendarTasksJson)
                 .putString("data_roadmaps_$cleanEmail", roadmapsJson)
                 .putString("data_lessons_$cleanEmail", lessonsJson)
                 .putBoolean("cfg_is_coupled_$cleanEmail", isCoupled)
@@ -843,6 +827,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val expensesJson = accountsPrefs.getString("data_expenses_$cleanEmail", null)
             val learningTasksJson = accountsPrefs.getString("data_learning_tasks_$cleanEmail", null)
             val savingTasksJson = accountsPrefs.getString("data_saving_tasks_$cleanEmail", null)
+            val calendarTasksJson = accountsPrefs.getString("data_calendar_tasks_$cleanEmail", null)
             val roadmapsJson = accountsPrefs.getString("data_roadmaps_$cleanEmail", null)
             val lessonsJson = accountsPrefs.getString("data_lessons_$cleanEmail", null)
 
@@ -871,10 +856,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 if (!savingTasksJson.isNullOrEmpty()) {
-                    val savingTasks = moshi.adapter<List<com.example.data.model.SavingTask>>(
+                    val savings = moshi.adapter<List<com.example.data.model.SavingTask>>(
                         com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.SavingTask::class.java)
                     ).fromJson(savingTasksJson)
-                    savingTasks?.forEach { appDao.insertSavingTask(it) }
+                    savings?.forEach { appDao.insertSavingTask(it) }
+                }
+
+                if (!calendarTasksJson.isNullOrEmpty()) {
+                    val calendarTasks = moshi.adapter<List<com.example.data.model.CalendarTask>>(
+                        com.squareup.moshi.Types.newParameterizedType(List::class.java, com.example.data.model.CalendarTask::class.java)
+                    ).fromJson(calendarTasksJson)
+                    calendarTasks?.forEach { appDao.insertCalendarTask(it) }
                 }
 
                 if (!roadmapsJson.isNullOrEmpty()) {
@@ -930,26 +922,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Seeding logic
     private fun seedDefaultAccounts() {
-        val minnyoEmail = "minnyo.work@gmail.com"
-        val demoEmail = "demo@example.com"
-        
-        // Seed minnyo.work@gmail.com if it doesn't already exist
-        if (accountsPrefs.getString("acc_pwd_$minnyoEmail", null) == null) {
-            accountsPrefs.edit()
-                .putString("acc_pwd_$minnyoEmail", "123456".sha256())
-                .putString("acc_name_$minnyoEmail", "Minnyo")
-                .putString("acc_emoji_$minnyoEmail", "🦁")
-                .apply()
-        }
-        
-        // Seed demo@example.com if it doesn't already exist
-        if (accountsPrefs.getString("acc_pwd_$demoEmail", null) == null) {
-            accountsPrefs.edit()
-                .putString("acc_pwd_$demoEmail", "123456".sha256())
-                .putString("acc_name_$demoEmail", "DuoUser")
-                .putString("acc_emoji_$demoEmail", "🐻")
-                .apply()
-        }
+        // Intentionally empty: production builds must never ship pre-seeded
+        // accounts or a known password. Create accounts through Supabase Auth.
     }
 
     private suspend fun seedInitialDatabaseIfEmpty() = withContext(Dispatchers.IO) {

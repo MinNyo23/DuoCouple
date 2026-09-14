@@ -328,15 +328,14 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         }
     }
 
-    // Register account on Supabase user_accounts table
-    suspend fun registerAccountOnBackend(email: String, pwdHash: String, name: String, emoji: String): Boolean = withContext(Dispatchers.IO) {
+    // Store non-sensitive profile metadata only. Authentication belongs in Supabase Auth.
+    suspend fun registerAccountOnBackend(email: String, name: String, emoji: String): Boolean = withContext(Dispatchers.IO) {
         val url = getSupabaseUrl()
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext false
         try {
             val accountData = mapOf(
                 "email" to email,
-                "pwd_hash" to pwdHash,
                 "name" to name,
                 "emoji" to emoji
             )
@@ -363,7 +362,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext null
         try {
-            val request = buildBaseRequest("user_accounts", "GET", url, key, "email=eq.$email&limit=1")
+            val request = buildBaseRequest("user_accounts", "GET", url, key, "select=email,name,emoji&email=eq.$email&limit=1")
                 .get()
                 .build()
             client.newCall(request).execute().use { response ->
@@ -420,6 +419,10 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
     // Fetch all active device telemetries for Admin Portal overview
     suspend fun fetchAllTelemetriesFromBackend(): List<Map<String, Any>>? = withContext(Dispatchers.IO) {
+        // This endpoint must not be readable with the publishable key alone.
+        // Implement it behind Supabase Auth/RLS or a protected server function.
+        return@withContext null
+        /*
         val url = getSupabaseUrl()
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext null
@@ -441,6 +444,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             Log.e("SupabaseSync", "Failed to fetch all telemetries from backend", e)
             return@withContext null
         }
+        */
     }
 
     fun resetState() {
