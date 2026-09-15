@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import './style.css';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://xmikjxgzxbdmfjxiqanx.supabase.co';
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_vydoRvQkEBVcGBhtj77znQ_-V96mZ-J';
 const supabase = SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const tables = [['user_accounts','Accounts','Registered mobile accounts','users'],['user_profiles','Profiles','Couple profile records','heart'],['learning_roadmaps','Roadmaps','Learning plans','book'],['learning_tasks','Tasks','Daily learning tasks','check'],['expense_entries','Expenses','Income and spending entries','wallet'],['saving_tasks','Savings','Savings goals and rewards','save']];
 const icon = (name) => ({users:'♧',heart:'♡',book:'▱',check:'☑',wallet:'▣',save:'◉'}[name] || '•');
@@ -32,4 +32,3 @@ async function loadUsers() {
 
 async function boot() { if (!supabase) { loginScreen('The dashboard is not configured. Add VITE_SUPABASE_ANON_KEY in Vercel.'); return; } const { data: { session } } = await supabase.auth.getSession(); if (!session) { loginScreen(); return; } renderDashboard({ ...(await loadDashboard()), user: session.user }); supabase.auth.onAuthStateChange((_event, nextSession) => { if (!nextSession) loginScreen(); }); }
 boot();
-
