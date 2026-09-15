@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     const adminClient = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
     const { data, error } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 100 });
     if (error) return send(res, 502, { error: 'Supabase could not return the user list.' });
-    return send(res, 200, { users: data.users.map((item) => ({ email: item.email, confirmed: Boolean(item.email_confirmed_at), created_at: item.created_at, last_sign_in_at: item.last_sign_in_at })) });
+    return send(res, 200, { users: data.users.map((item) => ({ id: item.id, name: item.user_metadata?.full_name || item.user_metadata?.name || [item.user_metadata?.first_name, item.user_metadata?.last_name].filter(Boolean).join(' ') || item.email?.split('@')[0] || 'Unnamed user', email: item.email, confirmed: Boolean(item.email_confirmed_at), created_at: item.created_at, last_sign_in_at: item.last_sign_in_at })) });
   } catch (error) {
     return send(res, 500, { error: 'Unexpected server error.' });
   }
