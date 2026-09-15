@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -3361,11 +3363,15 @@ fun ProfilesScreen(viewModel: MainViewModel) {
     var myEmoji by remember { mutableStateOf("") }
     var myBudget by remember { mutableStateOf("") }
     var myGoal by remember { mutableStateOf("") }
+    var myImageUri by remember { mutableStateOf<String?>(null) }
 
     var gfName by remember { mutableStateOf("") }
     var gfEmoji by remember { mutableStateOf("") }
     var gfBudget by remember { mutableStateOf("") }
     var gfGoal by remember { mutableStateOf("") }
+    var gfImageUri by remember { mutableStateOf<String?>(null) }
+    val myImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> myImageUri = uri?.toString() }
+    val gfImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> gfImageUri = uri?.toString() }
 
     var supabaseUrl by remember { mutableStateOf(viewModel.supabaseSyncManager.getSupabaseUrl()) }
     var supabaseKey by remember { mutableStateOf(viewModel.supabaseSyncManager.getSupabaseAnonKey()) }
@@ -3490,11 +3496,19 @@ fun ProfilesScreen(viewModel: MainViewModel) {
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            OutlinedButton(onClick = { myImagePicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.AddAPhoto, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (myImageUri == null) "Choose profile image" else "Profile image selected")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Button(
                 onClick = {
                     val bud = myBudget.toDoubleOrNull() ?: 80.0
                     val gol = myGoal.toDoubleOrNull() ?: 600.0
-                    viewModel.updateProfile("user", myName.ifBlank { "Minnyo" }, myEmoji.ifBlank { "🦁" }, bud, gol)
+                    viewModel.updateProfile("user", myName.ifBlank { "Minnyo" }, myEmoji.ifBlank { "🦁" }, bud, gol, myImageUri)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
@@ -3586,11 +3600,19 @@ fun ProfilesScreen(viewModel: MainViewModel) {
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            OutlinedButton(onClick = { gfImagePicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.AddAPhoto, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (gfImageUri == null) "Choose partner image" else "Partner image selected")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Button(
                 onClick = {
                     val bud = gfBudget.toDoubleOrNull() ?: 70.0
                     val gol = gfGoal.toDoubleOrNull() ?: 550.0
-                    viewModel.updateProfile("girlfriend", gfName.ifBlank { "Honey 🌸" }, gfEmoji.ifBlank { "🦄" }, bud, gol)
+                    viewModel.updateProfile("girlfriend", gfName.ifBlank { "Honey 🌸" }, gfEmoji.ifBlank { "🦄" }, bud, gol, gfImageUri)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),

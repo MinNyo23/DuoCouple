@@ -247,13 +247,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Profiles
-    fun updateProfile(id: String, name: String, avatar: String, dailyBudget: Double, monthlySavingGoal: Double) {
+    fun updateProfile(id: String, name: String, avatar: String, dailyBudget: Double, monthlySavingGoal: Double, imageUri: String? = null) {
         viewModelScope.launch {
+            val remoteImagePath = imageUri?.takeIf { it.isNotBlank() }?.let {
+                runCatching { supabaseSyncManager.uploadProfileImage(supabaseSyncManager.authUserId().ifBlank { id }, it) }.getOrNull()
+            }
             repository.insertProfile(
                 UserProfile(
                     id = id,
                     name = name,
                     avatarEmoji = avatar,
+                    imageUri = imageUri,
+                    remoteImagePath = remoteImagePath,
                     dailyBudget = dailyBudget,
                     monthlySavingGoal = monthlySavingGoal
                 )
