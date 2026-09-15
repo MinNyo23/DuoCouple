@@ -3,65 +3,33 @@ import './style.css';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://xmikjxgzxbdmfjxiqanx.supabase.co';
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const supabase = SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-
-const tables = [
-  ['user_accounts', 'Accounts', 'Users registered through the mobile app', 'users'],
-  ['user_profiles', 'Profiles', 'Couple profile records', 'heart'],
-  ['learning_roadmaps', 'Roadmaps', 'Learning plans created for couples', 'book-open'],
-  ['learning_tasks', 'Tasks', 'Daily learning tasks', 'check-square'],
-  ['expense_entries', 'Expenses', 'Income and spending entries', 'wallet'],
-  ['saving_tasks', 'Savings', 'Savings goals and rewards', 'piggy-bank'],
-];
-
-const icon = (name) => ({ users: '♧', heart: '♡', 'book-open': '▱', 'check-square': '☑', wallet: '▣', 'piggy-bank': '◉' }[name] || '•');
+const supabase = SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
+const tables = [['user_accounts','Accounts','Registered mobile accounts','users'],['user_profiles','Profiles','Couple profile records','heart'],['learning_roadmaps','Roadmaps','Learning plans','book'],['learning_tasks','Tasks','Daily learning tasks','check'],['expense_entries','Expenses','Income and spending entries','wallet'],['saving_tasks','Savings','Savings goals and rewards','save']];
+const icon = (name) => ({users:'♧',heart:'♡',book:'▱',check:'☑',wallet:'▣',save:'◉'}[name] || '•');
 const fmt = (value) => new Intl.NumberFormat('en-US').format(value);
+const esc = (value='') => String(value).replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 
-async function countRows(table) {
-  if (!supabase) return null;
-  const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });
-  if (error) throw error;
-  return count ?? 0;
+function loginScreen(message = '') {
+  document.querySelector('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><div class="brand login-brand"><div class="brand-mark">D<span>+</span>C</div><div><b>DuoCouple</b><small>Control room</small></div></div><span class="kicker">Private workspace</span><h1>Welcome back.</h1><p class="login-copy">Sign in with your Supabase account to access the DuoCouple dashboard.</p>${message ? `<div class="login-error">${esc(message)}</div>` : ''}<form id="login-form"><label>Email<input type="email" id="email" autocomplete="username" required placeholder="you@example.com"></label><label>Password<input type="password" id="password" autocomplete="current-password" required minlength="6" placeholder="Your password"></label><button class="primary" type="submit">Sign in securely <span>→</span></button></form><p class="login-foot">Access is protected by Supabase Auth. Never share your password.</p></div></div>`;
+  document.querySelector('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true; button.textContent = 'Signing in…'; const { error } = await supabase.auth.signInWithPassword({ email: document.querySelector('#email').value.trim(), password: document.querySelector('#password').value }); if (error) { loginScreen(error.message); } else { await boot(); } });
 }
 
-async function loadDashboard() {
-  const results = await Promise.allSettled(tables.map(([table]) => countRows(table)));
-  const values = results.map((result) => result.status === 'fulfilled' ? result.value : null);
-  const connected = Boolean(supabase) && results.some((result) => result.status === 'fulfilled');
-  const error = results.find((result) => result.status === 'rejected')?.reason;
-  return { values, connected, error };
-}
+async function countRows(table) { const { count, error } = await supabase.from(table).select('*', { count:'exact', head:true }); if (error) throw error; return count ?? 0; }
+async function loadDashboard() { const results = await Promise.allSettled(tables.map(([table]) => countRows(table))); return { values: results.map((r) => r.status === 'fulfilled' ? r.value : null), error: results.find((r) => r.status === 'rejected')?.reason }; }
 
-function render({ values, connected, error }) {
+function renderDashboard({ values, error, user }) {
   const total = values.filter(Number.isFinite).reduce((sum, value) => sum + value, 0);
-  const cards = tables.map(([table, label, description, glyph], index) => `
-    <article class="metric-card">
-      <div class="metric-top"><span class="metric-icon">${icon(glyph)}</span><span class="metric-label">${label}</span></div>
-      <strong>${values[index] === null ? '—' : fmt(values[index])}</strong>
-      <p>${description}</p>
-      <small>${table}</small>
-    </article>`).join('');
-
-  document.querySelector('#app').innerHTML = `
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand"><div class="brand-mark">D<span>+</span>C</div><div><b>DuoCouple</b><small>Control room</small></div></div>
-        <nav><a class="active" href="#overview">Overview</a><a href="#data">Data catalog</a><a href="#security">Security notes</a></nav>
-        <div class="side-note"><span class="pulse"></span><div><b>Supabase backend</b><small>${connected ? 'Connected and responding' : 'Waiting for credentials'}</small></div></div>
-      </aside>
-      <main class="content">
-        <header class="topbar"><div><p class="eyebrow">DuoCouple / Admin</p><h1>Good morning, Malson.</h1><p class="subtitle">A calm view of your couple app’s cloud activity.</p></div><button id="refresh" class="refresh">↻ Refresh data</button></header>
-        ${!SUPABASE_KEY ? `<section class="notice warning"><span>!</span><div><b>Connect this dashboard to Supabase</b><p>Add <code>VITE_SUPABASE_ANON_KEY</code> in Vercel Project Settings → Environment Variables, then redeploy. The publishable key is safe for browser use; never add a service-role key.</p></div></section>` : ''}
-        ${error ? `<section class="notice error"><span>!</span><div><b>Supabase returned an error</b><p>${error.message || 'Check your RLS policies and table permissions.'}</p></div></section>` : ''}
-        <section id="overview" class="hero-grid"><div class="hero-card"><div><span class="kicker">Cloud snapshot</span><h2>Your shared life,<br /><em>in sync.</em></h2><p>${connected ? 'Live counts are being read from your Supabase project.' : 'The dashboard is deployed and ready for your Supabase publishable key.'}</p></div><div class="orb"><div class="orb-inner">D<span>+</span>C</div></div></div><div class="summary-card"><span class="kicker">Records across core tables</span><strong>${connected ? fmt(total) : '—'}</strong><p>Read-only overview of your current cloud data.</p><div class="summary-line"><span>Project</span><b>xmikjxgzxbdmfjxiqanx</b></div><div class="summary-line"><span>Environment</span><b class="tag">Vercel · Hobby</b></div></div></section>
-        <div class="section-heading"><div><span class="kicker">Live data</span><h2>Core collections</h2></div><span class="updated">${connected ? 'Updated just now' : 'Not connected yet'}</span></div>
-        <section id="data" class="metrics">${cards}</section>
-        <section id="security" class="security"><div class="security-icon">✓</div><div><b>Production safety checkpoint</b><p>This dashboard only uses the Supabase publishable/anon key. Keep Row Level Security enabled and add authenticated policies before exposing private couple data.</p></div><a href="https://supabase.com/dashboard/project/xmikjxgzxbdmfjxiqanx/auth/policies" target="_blank" rel="noreferrer">Review policies ↗</a></section>
-        <footer><span>DuoCouple web dashboard · deployed from GitHub</span><a href="https://github.com/MinNyo23/DuoCouple" target="_blank" rel="noreferrer">View repository ↗</a></footer>
-      </main>
-    </div>`;
-  document.querySelector('#refresh').addEventListener('click', async () => { document.querySelector('#refresh').textContent = '↻ Loading…'; render(await loadDashboard()); });
+  const cards = tables.map(([table,label,description,glyph], index) => `<article class="metric-card"><div class="metric-top"><span class="metric-icon">${icon(glyph)}</span><span class="metric-label">${label}</span></div><strong>${values[index] === null ? '—' : fmt(values[index])}</strong><p>${description}</p><small>${table}</small></article>`).join('');
+  document.querySelector('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">D<span>+</span>C</div><div><b>DuoCouple</b><small>Control room</small></div></div><nav><a class="active" href="#overview">Overview</a><a href="#users">User list</a><a href="#security">Security notes</a></nav><div class="side-note"><span class="pulse"></span><div><b>Authenticated</b><small>${esc(user.email)}</small></div></div><button id="logout" class="logout">Sign out</button></aside><main class="content"><header class="topbar"><div><p class="eyebrow">DuoCouple / Admin</p><h1>Good morning.</h1><p class="subtitle">A secure view of your couple app’s cloud activity.</p></div><div class="header-actions"><span class="session-pill">● Secure session</span><button id="refresh" class="refresh">↻ Refresh data</button></div></header>${error ? `<section class="notice error"><span>!</span><div><b>Some data could not be loaded</b><p>${esc(error.message || 'Check your RLS policies and table permissions.')}</p></div></section>` : ''}<section id="overview" class="hero-grid"><div class="hero-card"><div><span class="kicker">Cloud snapshot</span><h2>Your shared life,<br /><em>in sync.</em></h2><p>Live counts are read from your Supabase project through your authenticated session.</p></div><div class="orb"><div class="orb-inner">D<span>+</span>C</div></div></div><div class="summary-card"><span class="kicker">Records across core tables</span><strong>${fmt(total)}</strong><p>Read-only overview of current cloud data.</p><div class="summary-line"><span>Signed in as</span><b>${esc(user.email)}</b></div><div class="summary-line"><span>Environment</span><b class="tag">Vercel · Supabase</b></div></div></section><div class="section-heading"><div><span class="kicker">Live data</span><h2>Core collections</h2></div><span class="updated">Updated just now</span></div><section class="metrics">${cards}</section><section id="users" class="users-panel"><div class="section-heading compact"><div><span class="kicker">Administration</span><h2>Application users</h2><p>Supabase Auth users with their account status and sign-in activity.</p></div><button id="load-users" class="refresh">Load user list</button></div><div id="users-result" class="users-result"><div class="empty-state">User records are protected and loaded only through the secure server endpoint.</div></div></section><section id="security" class="security"><div class="security-icon">✓</div><div><b>Protected dashboard</b><p>Browser access uses Supabase Auth. The user-list endpoint verifies your access token and admin role server-side; the service-role key never reaches the browser.</p></div><a href="https://supabase.com/dashboard/project/xmikjxgzxbdmfjxiqanx/auth/policies" target="_blank" rel="noreferrer">Review policies ↗</a></section><footer><span>DuoCouple web dashboard · deployed from GitHub</span><a href="https://github.com/MinNyo23/DuoCouple" target="_blank" rel="noreferrer">View repository ↗</a></footer></main></div>`;
+  document.querySelector('#logout').addEventListener('click', async () => { await supabase.auth.signOut(); loginScreen(); });
+  document.querySelector('#refresh').addEventListener('click', async () => { document.querySelector('#refresh').textContent = '↻ Loading…'; renderDashboard({ ...(await loadDashboard()), user }); });
+  document.querySelector('#load-users').addEventListener('click', loadUsers);
 }
 
-render(await loadDashboard());
+async function loadUsers() {
+  const target = document.querySelector('#users-result'); const button = document.querySelector('#load-users'); button.disabled = true; button.textContent = 'Loading…'; target.innerHTML = '<div class="empty-state">Checking your admin permission…</div>'; const { data: { session } } = await supabase.auth.getSession(); const response = await fetch('/api/users', { headers: { Authorization: `Bearer ${session?.access_token || ''}` } }); const body = await response.json().catch(() => ({})); button.disabled = false; button.textContent = 'Refresh user list'; if (!response.ok) { target.innerHTML = `<div class="users-error"><b>${response.status === 403 ? 'Admin permission required' : 'Could not load users'}</b><p>${esc(body.error || 'The secure endpoint rejected this request.')}</p></div>`; return; } target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Email</th><th>Status</th><th>Created</th><th>Last sign-in</th></tr></thead><tbody>${body.users.map((user) => `<tr><td>${esc(user.email || '—')}</td><td><span class="status ${user.confirmed ? 'confirmed' : ''}">${user.confirmed ? 'Confirmed' : 'Unconfirmed'}</span></td><td>${esc(user.created_at ? new Date(user.created_at).toLocaleDateString() : '—')}</td><td>${esc(user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'Never')}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+async function boot() { if (!supabase) { loginScreen('The dashboard is not configured. Add VITE_SUPABASE_ANON_KEY in Vercel.'); return; } const { data: { session } } = await supabase.auth.getSession(); if (!session) { loginScreen(); return; } renderDashboard({ ...(await loadDashboard()), user: session.user }); supabase.auth.onAuthStateChange((_event, nextSession) => { if (!nextSession) loginScreen(); }); }
+boot();
 
