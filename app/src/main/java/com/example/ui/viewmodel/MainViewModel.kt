@@ -289,12 +289,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val hashedPassword = password.sha256()
 
-        // If Supabase is configured, see if account already exists on the backend
+        // Create credentials in Supabase Auth first so the mobile account works across devices.
         if (supabaseSyncManager.isConfigured()) {
-            val remoteAccount = supabaseSyncManager.fetchAccountFromBackend(cleanEmail)
-            if (remoteAccount != null) {
-                return "An account with this email already exists on the backend"
-            }
+            val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = true)
+            if (authError != null) return authError
         }
 
         val existingPwd = accountsPrefs.getString("acc_pwd_$cleanEmail", null)
@@ -347,8 +345,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val hashedPassword = password.sha256()
 
+        if (registeredPwd == null && supabaseSyncManager.isConfigured()) {
+            val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = false)
+            if (authError != null) return authError
+            val remoteAccount = supabaseSyncManager.fetchAccountFromBackend(cleanEmail)
+            name = remoteAccount?.get("name") ?: "User"
+            emoji = remoteAccount?.get("emoji") ?: "🦁"
+            accountsPrefs.edit()
+                .putString("acc_pwd_$cleanEmail", hashedPassword)
+                .putString("acc_name_$cleanEmail", name)
+                .putString("acc_emoji_$cleanEmail", emoji)
+                .apply()
+            registeredPwd = hashedPassword
+        }
+
         if (registeredPwd == null) {
-            return "No local account found. Supabase Auth integration is required for cross-device sign-in."
+            return "No account found. Connect to Supabase or register on this device first."
         }
 
         if (registeredPwd != hashedPassword && registeredPwd != password) {

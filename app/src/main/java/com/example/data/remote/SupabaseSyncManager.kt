@@ -328,6 +328,37 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         }
     }
 
+    // Supabase Auth is the source of truth for mobile account credentials.
+    suspend fun authenticateWithSupabase(email: String, password: String, createAccount: Boolean): String? = withContext(Dispatchers.IO) {
+        val url = getSupabaseUrl()
+        val key = getSupabaseAnonKey()
+        if (url.isBlank() || key.isBlank()) return@withContext "Supabase is not configured on this device"
+        try {
+            val payload = mapOf("email" to email, "password" to password)
+            val adapter = moshi.adapter<Map<String, String>>(Types.newParameterizedType(Map::class.java, String::class.java, String::class.java))
+            val endpoint = if (createAccount) "auth/v1/signup" else "auth/v1/token?grant_type=password"
+            val request = Request.Builder()
+                .url(if (url.endsWith("/")) "$url$endpoint" else "$url/$endpoint")
+                .header("apikey", key)
+                .header("Content-Type", "application/json")
+                .post(adapter.toJson(payload).toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) return@withContext null
+                val message = response.body?.string().orEmpty()
+                return@withContext when {
+                    response.code == 429 -> "Too many attempts. Please wait and try again."
+                    createAccount && response.code == 422 -> "This email is already registered"
+                    !createAccount && response.code == 400 -> "Invalid email or password"
+                    else -> "Supabase authentication failed. Check your connection and try again."
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("SupabaseSync", "Supabase Auth request failed", e)
+            return@withContext "Unable to reach Supabase. Check your internet connection."
+        }
+    }
+
     // Store non-sensitive profile metadata only. Authentication belongs in Supabase Auth.
     suspend fun registerAccountOnBackend(email: String, name: String, emoji: String): Boolean = withContext(Dispatchers.IO) {
         val url = getSupabaseUrl()
