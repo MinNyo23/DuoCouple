@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import './style.css';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://xmikjxgzxbdmfjxiqanx.supabase.co';
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_vydoRvQkEBVcGBhtj77znQ_-V96mZ-J';
-const supabase = SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim() || '';
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '';
+const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const tables = [['user_accounts','Accounts','Registered mobile accounts','users'],['user_profiles','Profiles','Couple profile records','heart'],['learning_roadmaps','Roadmaps','Learning plans','book'],['learning_tasks','Tasks','Daily learning tasks','check'],['expense_entries','Expenses','Income and spending entries','wallet'],['saving_tasks','Savings','Savings goals and rewards','save']];
 const icon = (name) => ({users:'♧',heart:'♡',book:'▱',check:'☑',wallet:'▣',save:'◉'}[name] || '•');
 const fmt = (value) => new Intl.NumberFormat('en-US').format(value);
@@ -11,10 +11,10 @@ const esc = (value='') => String(value).replace(/[&<>'"]/g, (char) => ({'&':'&am
 
 function loginScreen(message = '') {
   document.querySelector('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><div class="brand login-brand"><div class="brand-mark">D<span>+</span>C</div><div><b>DuoCouple</b><small>Control room</small></div></div><span class="kicker">Private workspace</span><h1>Welcome back.</h1><p class="login-copy">Sign in with your Supabase account to access the DuoCouple dashboard.</p>${message ? `<div class="login-error">${esc(message)}</div>` : ''}<form id="login-form"><label>Email<input type="email" id="email" autocomplete="username" required placeholder="you@example.com"></label><label>Password<input type="password" id="password" autocomplete="current-password" required minlength="6" placeholder="Your password"></label><button class="primary" type="submit">Sign in securely <span>→</span></button></form><p class="login-foot">Access is protected by Supabase Auth. Never share your password.</p></div></div>`;
-  document.querySelector('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true; button.textContent = 'Signing in…'; const { error } = await supabase.auth.signInWithPassword({ email: document.querySelector('#email').value.trim(), password: document.querySelector('#password').value }); if (error) { loginScreen(error.message); } else { await boot(); } });
+  document.querySelector('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true; button.textContent = 'Signing in…'; const { error } = await supabase.auth.signInWithPassword({ email: document.querySelector('#email').value.trim(), password: document.querySelector('#password').value }); if (error) { loginScreen(error.status === 429 ? 'Too many attempts. Please wait and try again.' : 'Invalid email or password.'); } else { await boot(); } });
 }
 
-async function countRows(table) { const { count, error } = await supabase.from(table).select('*', { count:'exact', head:true }); if (error) throw error; return count ?? 0; }
+async function countRows(table) { const { count, error } = await supabase.from(table).select('id', { count:'exact', head:true }); if (error) throw error; return count ?? 0; }
 async function loadDashboard() { const results = await Promise.allSettled(tables.map(([table]) => countRows(table))); return { values: results.map((r) => r.status === 'fulfilled' ? r.value : null), error: results.find((r) => r.status === 'rejected')?.reason }; }
 
 function renderDashboard({ values, error, user }) {

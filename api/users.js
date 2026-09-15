@@ -6,8 +6,8 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  const url = process.env.SUPABASE_URL || 'https://xmikjxgzxbdmfjxiqanx.supabase.co';
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!token) return send(res, 401, { error: 'A valid login session is required.' });
   if (!anonKey || !serviceKey) return send(res, 500, { error: 'Server authentication is not configured.' });
