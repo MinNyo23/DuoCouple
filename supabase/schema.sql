@@ -7,6 +7,8 @@ create table if not exists public.user_profiles (
   id text primary key,
   name text not null,
   "avatarEmoji" text not null,
+  "imageUri" text,
+  "remoteImagePath" text,
   "dailyBudget" double precision not null default 50.0,
   "monthlySavingGoal" double precision not null default 500.0
 );
@@ -88,6 +90,23 @@ create index if not exists learning_roadmaps_owner_idx on public.learning_roadma
 create index if not exists learning_tasks_owner_date_idx on public.learning_tasks ("ownerId", "dateString");
 create index if not exists expense_entries_owner_date_idx on public.expense_entries ("ownerId", "dateString");
 create index if not exists saving_tasks_owner_date_idx on public.saving_tasks ("ownerId", "dateString");
+
+insert into storage.buckets (id, name, public)
+values ('profile-images', 'profile-images', false)
+on conflict (id) do nothing;
+
+create policy "profile images insert own folder" on storage.objects
+for insert to authenticated
+with check (bucket_id = 'profile-images' and (storage.foldername(name))[1] = 'profiles' and (storage.foldername(name))[2] = (select auth.uid()::text));
+
+create policy "profile images select own folder" on storage.objects
+for select to authenticated
+using (bucket_id = 'profile-images' and (storage.foldername(name))[1] = 'profiles' and (storage.foldername(name))[2] = (select auth.uid()::text));
+
+create policy "profile images update own folder" on storage.objects
+for update to authenticated
+using (bucket_id = 'profile-images' and (storage.foldername(name))[1] = 'profiles' and (storage.foldername(name))[2] = (select auth.uid()::text))
+with check (bucket_id = 'profile-images' and (storage.foldername(name))[1] = 'profiles' and (storage.foldername(name))[2] = (select auth.uid()::text));
 
 -- Security checklist:
 -- 1. Enable RLS on every table before production.

@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import com.example.data.db.AppDao
 import com.example.data.model.*
@@ -26,6 +27,9 @@ sealed class SupabaseSyncState {
     data class Success(val message: String) : SupabaseSyncState()
     data class Error(val errorReason: String) : SupabaseSyncState()
 }
+
+private data class SupabaseAuthUser(val id: String? = null)
+private data class SupabaseAuthSession(val access_token: String? = null, val refresh_token: String? = null, val user: SupabaseAuthUser? = null)
 
 class SupabaseSyncManager(private val context: Context, private val appDao: AppDao) {
     
@@ -77,6 +81,21 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         sharedPrefs.edit()
             .remove("supabase_url_prefs")
             .remove("supabase_anon_key_prefs")
+            .remove("supabase_access_token")
+            .remove("supabase_refresh_token")
+            .apply()
+    }
+
+    fun authUserId(): String = sharedPrefs.getString("supabase_user_id", "") ?: ""
+
+    private fun accessToken(): String = sharedPrefs.getString("supabase_access_token", "") ?: ""
+
+    private fun authHeader(key: String): String = accessToken().ifBlank { key }
+
+    private fun saveAuthSession(accessToken: String, refreshToken: String?) {
+        sharedPrefs.edit()
+            .putString("supabase_access_token", accessToken)
+            .putString("supabase_refresh_token", refreshToken.orEmpty())
             .apply()
     }
 
@@ -100,7 +119,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         return Request.Builder()
             .url(finalUrl)
             .header("apikey", key)
-            .header("Authorization", "Bearer $key")
+            .header("Authorization", "Bearer ${authHeader(key)}")
     }
 
     // Connect / Test status
@@ -344,8 +363,17 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
                 .post(adapter.toJson(payload).toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
             client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) return@withContext null
-                val message = response.body?.string().orEmpty()
+                val responseBody = response.body?.string().orEmpty()
+                if (response.isSuccessful) {
+                    val sessionAdapter = moshi.adapter(SupabaseAuthSession::class.java)
+                    val session = runCatching { sessionAdapter.fromJson(responseBody) }.getOrNull()
+                    if (!session?.access_token.isNullOrBlank()) {
+                        saveAuthSession(session!!.access_token!!, session.refresh_token)
+                        sharedPrefs.edit().putString("supabase_user_id", session.user?.id.orEmpty()).apply()
+                    }
+                    return@withContext null
+                }
+                val message = responseBody
                 return@withContext when {
                     response.code == 429 -> "Too many attempts. Please wait and try again."
                     createAccount && response.code == 422 -> "This email is already registered"
@@ -356,6 +384,30 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         } catch (e: Exception) {
             Log.e("SupabaseSync", "Supabase Auth request failed", e)
             return@withContext "Unable to reach Supabase. Check your internet connection."
+        }
+    }
+
+    suspend fun uploadProfileImage(userId: String, imageUri: String): String? = withContext(Dispatchers.IO) {
+        val url = getSupabaseUrl()
+        val key = getSupabaseAnonKey()
+        val token = accessToken()
+        if (url.isBlank() || key.isBlank() || token.isBlank()) return@withContext null
+        val uri = Uri.parse(imageUri)
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
+        require(bytes.size <= 10 * 1024 * 1024) { "Image must be smaller than 10 MB" }
+        val path = "profiles/$userId/avatar"
+        val endpoint = if (url.endsWith("/")) "${url}storage/v1/object/profile-images/$path" else "$url/storage/v1/object/profile-images/$path"
+        val request = Request.Builder()
+            .url(endpoint)
+            .header("apikey", key)
+            .header("Authorization", "Bearer $token")
+            .header("x-upsert", "true")
+            .header("Content-Type", context.contentResolver.getType(uri) ?: "image/jpeg")
+            .put(bytes.toRequestBody((context.contentResolver.getType(uri) ?: "image/jpeg").toMediaType()))
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("Image upload failed (${response.code})")
+            path
         }
     }
 

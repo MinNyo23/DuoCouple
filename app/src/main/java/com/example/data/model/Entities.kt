@@ -8,6 +8,8 @@ data class UserProfile(
     @PrimaryKey val id: String, // "user" (Minnyo) or "girlfriend" (Sweetheart)
     val name: String,
     val avatarEmoji: String,
+    val imageUri: String? = null,
+    val remoteImagePath: String? = null,
     val dailyBudget: Double = 50.0,
     val monthlySavingGoal: Double = 500.0
 )
