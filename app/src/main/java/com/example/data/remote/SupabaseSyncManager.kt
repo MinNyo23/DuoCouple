@@ -42,14 +42,11 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
     private val _syncState = MutableStateFlow<SupabaseSyncState>(SupabaseSyncState.Idle)
     val syncState: StateFlow<SupabaseSyncState> = _syncState.asStateFlow()
 
-    // Retrieve configured credentials from SharedPreferences or fallback to BuildConfig helper (via .env)
+    // Retrieve configured credentials from SharedPreferences or BuildConfig values supplied at build time.
+    // Never embed a Supabase secret/service-role key in an Android APK.
     fun getSupabaseUrl(): String {
-        val hardcoded = "https://ueqpbsckbqkqcwtssfap.supabase.co"
-        if (hardcoded.isNotBlank()) return hardcoded
-        
         val saved = sharedPrefs.getString("supabase_url_prefs", "") ?: ""
         if (saved.isNotBlank()) return saved
-        // Safe check for BuildConfig
         return try {
             val field = com.example.BuildConfig::class.java.getField("SUPABASE_URL")
             field.get(null) as? String ?: ""
@@ -59,12 +56,8 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
     }
 
     fun getSupabaseAnonKey(): String {
-        val hardcoded = "sb_secret_iYwa5Hsct1FoFaMKZqIXyA_zFSiU0Nr"
-        if (hardcoded.isNotBlank()) return hardcoded
-        
         val saved = sharedPrefs.getString("supabase_anon_key_prefs", "") ?: ""
         if (saved.isNotBlank()) return saved
-        // Safe check for BuildConfig
         return try {
             val field = com.example.BuildConfig::class.java.getField("SUPABASE_ANON_KEY")
             field.get(null) as? String ?: ""
@@ -88,12 +81,19 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
     }
 
     fun isConfigured(): Boolean {
-        return getSupabaseUrl().isNotBlank() && getSupabaseAnonKey().isNotBlank()
+        val url = getSupabaseUrl().trim()
+        val key = getSupabaseAnonKey().trim()
+        return url.startsWith("https://") &&
+            !url.contains("your-project", ignoreCase = true) &&
+            key.isNotBlank() &&
+            !key.contains("your-anon-public-key", ignoreCase = true) &&
+            !key.contains("MY_", ignoreCase = true)
     }
 
     // --- Dynamic Raw Client Implementations ---
 
     private fun buildBaseRequest(tableName: String, method: String, url: String, key: String, queryParams: String = ""): Request.Builder {
+        require(url.startsWith("https://")) { "Supabase URL must use HTTPS" }
         val fullUrl = if (url.endsWith("/")) "${url}rest/v1/$tableName" else "$url/rest/v1/$tableName"
         val finalUrl = if (queryParams.isNotBlank()) "$fullUrl?$queryParams" else fullUrl
         
@@ -108,10 +108,6 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         val url = getSupabaseUrl()
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext false
-
-        if (url.contains("your-project") || url.contains("demo") || key.contains("demo")) {
-            return@withContext true
-        }
 
         try {
             val request = buildBaseRequest("user_profiles", "GET", url, key, "select=id&limit=1").get().build()
@@ -135,29 +131,9 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             return@withContext
         }
 
-        if (url.contains("your-project") || url.contains("demo") || key.contains("demo")) {
-            _syncState.value = SupabaseSyncState.Loading("Simulating Push...")
-            kotlinx.coroutines.delay(1000)
-            _syncState.value = SupabaseSyncState.Success("All local data backed up to Supabase successfully!")
-            return@withContext
-        }
-
         try {
-            _syncState.value = SupabaseSyncState.Loading("Clearing existing Supabase data...")
-
-            // List of tables to sync
-            val tables = listOf(
-                "user_profiles", "learning_roadmaps", "roadmap_lessons",
-                "learning_tasks", "expense_entries", "saving_tasks", "calendar_tasks"
-            )
-
-            // Step 1: Clear all tables in order on Supabase
-            for (table in tables) {
-                val deleteReq = buildBaseRequest(table, "DELETE", url, key, "id=not.is.null").delete().build()
-                client.newCall(deleteReq).execute().close()
-            }
-
-            // Step 2: Push current local DB tables to Supabase
+            _syncState.value = SupabaseSyncState.Loading("Uploading local data safely...")
+            // Upsert local rows without deleting records from other devices or users.
             _syncState.value = SupabaseSyncState.Loading("Pushing Profiles...")
             // Synchronously reading from Room lists (cannot block Room Main but safe here)
             val appDao = appDao
@@ -238,13 +214,6 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
         if (url.isBlank() || key.isBlank()) {
             _syncState.value = SupabaseSyncState.Error("Supabase URL or Anon Key is missing!")
-            return@withContext
-        }
-
-        if (url.contains("your-project") || url.contains("demo") || key.contains("demo")) {
-            _syncState.value = SupabaseSyncState.Loading("Simulating Pull...")
-            kotlinx.coroutines.delay(1000)
-            _syncState.value = SupabaseSyncState.Success("Restored 0 cached items from Supabase!")
             return@withContext
         }
 
@@ -359,15 +328,14 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         }
     }
 
-    // Register account on Supabase user_accounts table
-    suspend fun registerAccountOnBackend(email: String, pwdHash: String, name: String, emoji: String): Boolean = withContext(Dispatchers.IO) {
+    // Store non-sensitive profile metadata only. Authentication belongs in Supabase Auth.
+    suspend fun registerAccountOnBackend(email: String, name: String, emoji: String): Boolean = withContext(Dispatchers.IO) {
         val url = getSupabaseUrl()
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext false
         try {
             val accountData = mapOf(
                 "email" to email,
-                "pwd_hash" to pwdHash,
                 "name" to name,
                 "emoji" to emoji
             )
@@ -394,7 +362,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext null
         try {
-            val request = buildBaseRequest("user_accounts", "GET", url, key, "email=eq.$email&limit=1")
+            val request = buildBaseRequest("user_accounts", "GET", url, key, "select=email,name,emoji&email=eq.$email&limit=1")
                 .get()
                 .build()
             client.newCall(request).execute().use { response ->
@@ -451,6 +419,10 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
     // Fetch all active device telemetries for Admin Portal overview
     suspend fun fetchAllTelemetriesFromBackend(): List<Map<String, Any>>? = withContext(Dispatchers.IO) {
+        // This endpoint must not be readable with the publishable key alone.
+        // Implement it behind Supabase Auth/RLS or a protected server function.
+        return@withContext null
+        /*
         val url = getSupabaseUrl()
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext null
@@ -472,6 +444,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             Log.e("SupabaseSync", "Failed to fetch all telemetries from backend", e)
             return@withContext null
         }
+        */
     }
 
     fun resetState() {
