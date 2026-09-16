@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import { injectSpeedInsights } from '@vercel/speed-insights';
 import './style.css';
+
+// Initialize Vercel Speed Insights
+injectSpeedInsights();
 
 const url = (import.meta.env.VITE_SUPABASE_URL || '').trim();
 const key = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
