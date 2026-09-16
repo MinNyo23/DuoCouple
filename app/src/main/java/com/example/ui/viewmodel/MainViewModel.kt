@@ -29,12 +29,11 @@ import kotlinx.coroutines.Dispatchers
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.security.MessageDigest
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: AppRepository
     val supabaseSyncManager: SupabaseSyncManager
-    
+
     // --- Secure Duo-Coupling SharedPreferences ---
     private val sharedPrefs = application.getSharedPreferences("duo_space_auth_prefs", android.content.Context.MODE_PRIVATE)
     private val accountsPrefs = application.getSharedPreferences("local_accounts_prefs", android.content.Context.MODE_PRIVATE)
@@ -292,24 +291,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (password.length < 6) return "Password must be at least 6 characters"
         if (name.trim().isEmpty()) return "Name cannot be empty"
 
-        val hashedPassword = password.sha256()
-
-        // Create credentials in Supabase Auth first so the mobile account works across devices.
-        if (supabaseSyncManager.isConfigured()) {
-            val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = true)
-            if (authError != null) return authError
-        }
-
-        val existingPwd = accountsPrefs.getString("acc_pwd_$cleanEmail", null)
-        if (existingPwd != null) {
-            return "An account with this email already exists"
-        }
-
-        // Save locally
+        if (!supabaseSyncManager.isConfigured()) return "Secure sign-in is unavailable until Supabase is configured"
+        val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = true)
+        if (authError != null) return authError
         accountsPrefs.edit()
-            .putString("acc_pwd_$cleanEmail", hashedPassword)
             .putString("acc_name_$cleanEmail", name.trim())
             .putString("acc_emoji_$cleanEmail", emoji)
+            .remove("acc_pwd_$cleanEmail")
             .apply()
 
         // Clear old local tables before creating a brand-new user to prevent leftover session leak
@@ -344,40 +332,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (cleanEmail.isEmpty()) return "Email cannot be empty"
         if (password.isEmpty()) return "Password cannot be empty"
 
-        var registeredPwd = accountsPrefs.getString("acc_pwd_$cleanEmail", null)
+        if (!supabaseSyncManager.isConfigured()) return "Secure sign-in is unavailable until Supabase is configured"
+        val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = false)
+        if (authError != null) return authError
         var name = accountsPrefs.getString("acc_name_$cleanEmail", null)
         var emoji = accountsPrefs.getString("acc_emoji_$cleanEmail", null)
-
-        val hashedPassword = password.sha256()
-
-        if (registeredPwd == null && supabaseSyncManager.isConfigured()) {
-            val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = false)
-            if (authError != null) return authError
+        if (name == null || emoji == null) {
             val remoteAccount = supabaseSyncManager.fetchAccountFromBackend(cleanEmail)
             name = remoteAccount?.get("name") ?: "User"
             emoji = remoteAccount?.get("emoji") ?: "🦁"
             accountsPrefs.edit()
-                .putString("acc_pwd_$cleanEmail", hashedPassword)
                 .putString("acc_name_$cleanEmail", name)
                 .putString("acc_emoji_$cleanEmail", emoji)
+                .remove("acc_pwd_$cleanEmail")
                 .apply()
-            registeredPwd = hashedPassword
-        }
-
-        if (registeredPwd == null) {
-            return "No account found. Connect to Supabase or register on this device first."
-        }
-
-        if (registeredPwd != hashedPassword && registeredPwd != password) {
-            return "Incorrect password. Please try again."
-        }
-
-        // Automatic security upgrade for legacy plain-text accounts
-        if (registeredPwd == password) {
-            accountsPrefs.edit().putString("acc_pwd_$cleanEmail", hashedPassword).apply()
-            if (supabaseSyncManager.isConfigured()) {
-                supabaseSyncManager.registerAccountOnBackend(cleanEmail, name ?: "User", emoji ?: "🦁")
-            }
         }
 
         // Track active user email
@@ -403,12 +371,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun verifyEmailExists(email: String): Boolean = withContext(Dispatchers.IO) {
         val cleanEmail = email.trim().lowercase()
         if (cleanEmail.isEmpty()) return@withContext false
-        
-        // Check local
-        val localPwd = accountsPrefs.getString("acc_pwd_$cleanEmail", null)
-        if (localPwd != null) return@withContext true
-        
-        // Check backend
+
+        // Check Supabase Auth-backed profile metadata only.
+
         if (supabaseSyncManager.isConfigured()) {
             val remote = supabaseSyncManager.fetchAccountFromBackend(cleanEmail)
             if (remote != null) {
@@ -426,17 +391,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun updateAccountPassword(email: String, newPasswordPlain: String): Boolean = withContext(Dispatchers.IO) {
         val cleanEmail = email.trim().lowercase()
-        val hashedPassword = newPasswordPlain.sha256()
-        
-        // Fetch existing metadata to avoid losing name/emoji
-        val name = accountsPrefs.getString("acc_name_$cleanEmail", "User") ?: "User"
-        val emoji = accountsPrefs.getString("acc_emoji_$cleanEmail", "🦁") ?: "🦁"
-        
-        accountsPrefs.edit()
-            .putString("acc_pwd_$cleanEmail", hashedPassword)
-            .apply()
-            
-        true
+        if (!supabaseSyncManager.isConfigured() || newPasswordPlain.length < 6) return@withContext false
+        accountsPrefs.edit().remove("acc_pwd_$cleanEmail").apply()
+        supabaseSyncManager.updateAuthenticatedPassword(newPasswordPlain)
     }
 
     fun logIn(name: String, emoji: String) {
@@ -449,7 +406,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putString("my_name", name)
                 .putString("my_emoji", emoji)
                 .apply()
-            
+
             // Sync with database
             repository.insertProfile(
                 UserProfile(
@@ -481,7 +438,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putString("partner_name", partnerName)
                 .putString("partner_emoji", partnerEmoji)
                 .apply()
-            
+
             // Sync with database
             repository.insertProfile(
                 UserProfile(
@@ -519,9 +476,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _partnerProfileName.value = "Honey 🌸"
             _partnerProfileEmoji.value = "🦄"
             _loveStartDate.value = ""
-            
+
             sharedPrefs.edit().clear().apply()
-            
+            supabaseSyncManager.clearCredentials()
+            accountsPrefs.edit().remove("acc_pwd_$email").apply()
+
             // Clear current database values cleanly on Thread Pool
             withContext(Dispatchers.IO) {
                 val appDao = AppDatabase.getDatabase(getApplication()).appDao()
@@ -532,7 +491,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 appDao.clearExpenseEntries()
                 appDao.clearSavingTasks()
                 appDao.clearCalendarTasks()
-                
+
                 // Seed defaults again
                 appDao.insertProfile(UserProfile("user", "Minnyo", "🦁", dailyBudget = 80.0, monthlySavingGoal = 600.0))
                 appDao.insertProfile(UserProfile("girlfriend", "Honey 🌸", "🦄", dailyBudget = 70.0, monthlySavingGoal = 550.0))
@@ -546,7 +505,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val roadmapId = repository.insertRoadmap(
                 LearningRoadmap(ownerId = ownerId, title = title, description = description)
             ).toInt()
-            
+
             // Generate standard lessons
             lessons.forEachIndexed { index, lessonPair ->
                 repository.insertLesson(
@@ -1006,14 +965,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val devId = android.os.Build.ID ?: "simulated_id_${(1000..9999).random()}"
             val devName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
             val cpuSimulated = (10..65).random() // Realistic representation of active CPU workload
-            
+
             // Extract memory heap stats dynamically
             val totalMemory = Runtime.getRuntime().totalMemory()
             val freeMemory = Runtime.getRuntime().freeMemory()
             val usedMemory = (totalMemory - freeMemory).toDouble() / (1024.0 * 1024.0) // RAM usage in Megabytes
-            
+
             val activeMail = getActiveUserEmail()
-            
+
             supabaseSyncManager.pushTelemetryToBackend(
                 deviceId = devId,
                 deviceName = devName,
@@ -1043,15 +1002,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _adminDeviceTelemetries.value = list
             }
         }
-    }
-}
-
-private fun String.sha256(): String {
-    return try {
-        val bytes = MessageDigest.getInstance("SHA-256").digest(this.toByteArray())
-        bytes.joinToString("") { "%02x".format(it) }
-    } catch (e: Exception) {
-        // Fallback robust checksum matching if SHA-256 instance fails
-        this.hashCode().toString()
     }
 }

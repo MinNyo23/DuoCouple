@@ -387,6 +387,24 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         }
     }
 
+    suspend fun updateAuthenticatedPassword(newPassword: String): Boolean = withContext(Dispatchers.IO) {
+        val url = getSupabaseUrl()
+        val key = getSupabaseAnonKey()
+        val token = accessToken()
+        if (url.isBlank() || key.isBlank() || token.isBlank()) return@withContext false
+        val payload = mapOf("password" to newPassword)
+        val adapter = moshi.adapter<Map<String, String>>(Types.newParameterizedType(Map::class.java, String::class.java, String::class.java))
+        val endpoint = if (url.endsWith("/")) "${url}auth/v1/user" else "$url/auth/v1/user"
+        val request = Request.Builder()
+            .url(endpoint)
+            .header("apikey", key)
+            .header("Authorization", "Bearer $token")
+            .header("Content-Type", "application/json")
+            .patch(adapter.toJson(payload).toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+        client.newCall(request).execute().use { it.isSuccessful }
+    }
+
     suspend fun uploadProfileImage(userId: String, imageUri: String): String? = withContext(Dispatchers.IO) {
         val url = getSupabaseUrl()
         val key = getSupabaseAnonKey()
