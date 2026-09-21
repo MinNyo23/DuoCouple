@@ -73,6 +73,9 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
     fun saveCredentials(url: String, key: String) {
         val normalizedUrl = url.trim().trim('"', '\'').removeSuffix("/")
         val normalizedKey = key.trim().trim('"', '\'')
+            .removePrefix("Bearer ")
+            .removePrefix("bearer ")
+            .trim()
         sharedPrefs.edit()
             .putString("supabase_url_prefs", normalizedUrl)
             .putString("supabase_anon_key_prefs", normalizedKey)
@@ -129,16 +132,23 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             .header("Authorization", "Bearer ${authHeader(key)}")
     }
 
-    // Connect / Test status
+    // Validate the public key against Supabase Auth, not /rest/v1/.
+    // Table reads are intentionally checked separately because RLS may deny anon access.
     suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
-        val url = getSupabaseUrl()
-        val key = getSupabaseAnonKey()
+        val url = getSupabaseUrl().trim().removeSuffix("/")
+        val key = getSupabaseAnonKey().trim()
         if (url.isBlank() || key.isBlank()) return@withContext false
 
         try {
-            val request = buildBaseRequest("user_profiles", "GET", url, key, "select=id&limit=1").get().build()
+            val request = Request.Builder()
+                .url("$url/auth/v1/settings")
+                .header("apikey", key)
+                .header("Authorization", "Bearer $key")
+                .get()
+                .build()
             client.newCall(request).execute().use { response ->
-                return@withContext response.isSuccessful || response.code == 404 // 404 is still dynamic API access
+                Log.d("SupabaseSync", "Auth key check returned ${response.code}")
+                return@withContext response.isSuccessful
             }
         } catch (e: Exception) {
             Log.e("SupabaseSync", "Connection failed", e)
