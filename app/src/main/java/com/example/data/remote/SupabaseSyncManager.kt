@@ -71,9 +71,15 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
     }
 
     fun saveCredentials(url: String, key: String) {
+        val normalizedUrl = url.trim().trim('"', '\'').removeSuffix("/")
+        val normalizedKey = key.trim().trim('"', '\'')
         sharedPrefs.edit()
-            .putString("supabase_url_prefs", url.trim())
-            .putString("supabase_anon_key_prefs", key.trim())
+            .putString("supabase_url_prefs", normalizedUrl)
+            .putString("supabase_anon_key_prefs", normalizedKey)
+            // A session is bound to the previous project/key. Never reuse it after rotation.
+            .remove("supabase_access_token")
+            .remove("supabase_refresh_token")
+            .remove("supabase_user_id")
             .apply()
     }
 
@@ -101,10 +107,11 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
     fun isConfigured(): Boolean {
         val url = getSupabaseUrl().trim()
-        val key = getSupabaseAnonKey().trim()
+        val key = getSupabaseAnonKey().trim().trim('"', '\'')
+        val looksLikePublicKey = key.startsWith("eyJ") || key.startsWith("sb_publishable_")
         return url.startsWith("https://") &&
             !url.contains("your-project", ignoreCase = true) &&
-            key.isNotBlank() &&
+            looksLikePublicKey &&
             !key.contains("your-anon-public-key", ignoreCase = true) &&
             !key.contains("MY_", ignoreCase = true)
     }
