@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.Path
@@ -19,9 +18,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -286,6 +287,7 @@ fun AppNavigationContent(viewModel: MainViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
 
     AnimatedContent(
+        modifier = Modifier.fillMaxSize(),
         targetState = isAppLoading,
         transitionSpec = {
             if (targetState == false) {
@@ -311,6 +313,7 @@ fun AppNavigationContent(viewModel: MainViewModel) {
                 CoupleConnectScreen(viewModel)
             } else {
                 AnimatedContent(
+                    modifier = Modifier.fillMaxSize(),
                     targetState = selectedTab,
                     transitionSpec = {
                         val duration = 320
@@ -332,12 +335,14 @@ fun AppNavigationContent(viewModel: MainViewModel) {
                     },
                     label = "TabTransition"
                 ) { tab ->
-                    when (tab) {
-                        0 -> DashboardScreen(viewModel)
-                        1 -> LearningScreen(viewModel)
-                        2 -> ExpensesScreen(viewModel)
-                        3 -> SavingsAdvisorScreen(viewModel)
-                        4 -> ProfilesScreen(viewModel)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when (tab) {
+                            0 -> DashboardScreen(viewModel)
+                            1 -> LearningScreen(viewModel)
+                            2 -> ExpensesScreen(viewModel)
+                            3 -> SavingsAdvisorScreen(viewModel)
+                            4 -> ProfilesScreen(viewModel)
+                        }
                     }
                 }
             }
@@ -358,8 +363,8 @@ fun GlassCard(
         modifier = modifier
             .animateContentSize(
                 animationSpec = androidx.compose.animation.core.spring(
-                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
                 )
             )
             .clip(RoundedCornerShape(20.dp))
@@ -370,22 +375,30 @@ fun GlassCard(
                 .matchParentSize()
                 .background(color = GlassSurfaceDark) 
         )
-        // Internal decorative glassmorphic blurs
+        // Lightweight decorative accents (no blur — keeps list scroll smooth)
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .offset(x = (-30).dp, y = (-30).dp)
                 .size(120.dp)
-                .blur(50.dp)
-                .background(ElectricLavender.copy(alpha = 0.2f), CircleShape)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(ElectricLavender.copy(alpha = 0.22f), Color.Transparent)
+                    ),
+                    shape = CircleShape
+                )
         )
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .offset(x = 30.dp, y = 30.dp)
                 .size(120.dp)
-                .blur(50.dp)
-                .background(CosmicCyan.copy(alpha = 0.2f), CircleShape)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(CosmicCyan.copy(alpha = 0.18f), Color.Transparent)
+                    ),
+                    shape = CircleShape
+                )
         )
         // Border layer
         Box(
@@ -592,16 +605,19 @@ fun DashboardScreen(viewModel: MainViewModel) {
     val entertainmentSpent = remember(expenses) { expenses.filter { !it.isIncome && it.category == "Entertainment" }.sumOf { it.amount } }
     val otherSpent = remember(expenses) { expenses.filter { !it.isIncome && (it.category != "Food" && it.category != "Shopping" && it.category != "Transport" && it.category != "Entertainment") }.sumOf { it.amount } }
 
+    val dashboardListState = rememberLazyListState()
+
     LazyColumn(
+        state = dashboardListState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        flingBehavior = ScrollableDefaults.flingBehavior()
     ) {
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-
         // Dashboard Header
-        item {
+        item(key = "dashboard_header") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -630,7 +646,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
         }
 
         // --- Love Days Tracker Card ---
-        item {
+        item(key = "love_days") {
             val context = LocalContext.current
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -916,7 +932,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
         }
 
         // --- SECTION 1: Live Status & Presence Tracking ---
-        item {
+        item(key = "live_presence") {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 borderBrush = Brush.linearGradient(
@@ -967,7 +983,10 @@ fun DashboardScreen(viewModel: MainViewModel) {
                             .weight(1f)
                             .background(Color(0x0AFFFFFF), RoundedCornerShape(16.dp))
                             .border(1.dp, Color(0x12FFFFFF), RoundedCornerShape(16.dp))
-                            .clickable { showUserVibePicker = !showUserVibePicker }
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) { showUserVibePicker = !showUserVibePicker }
                             .padding(12.dp)
                     ) {
                         Row(
@@ -1012,7 +1031,10 @@ fun DashboardScreen(viewModel: MainViewModel) {
                             .weight(1f)
                             .background(Color(0x0AFFFFFF), RoundedCornerShape(16.dp))
                             .border(1.dp, Color(0x12FFFFFF), RoundedCornerShape(16.dp))
-                            .clickable { showGfVibePicker = !showGfVibePicker }
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) { showGfVibePicker = !showGfVibePicker }
                             .padding(12.dp)
                     ) {
                         Row(
@@ -1063,19 +1085,19 @@ fun DashboardScreen(viewModel: MainViewModel) {
                     ) {
                         Text("Set My Vibe Preset:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Spacer(modifier = Modifier.height(6.dp))
-                        Row(
+                        val userPresets = listOf(
+                            Pair("Coding 🧠", "🧠"),
+                            Pair("Coffee Break ☕", "☕"),
+                            Pair("Chilling 🍃", "🍃"),
+                            Pair("Loving You ❤️", "❤️"),
+                            Pair("Tired & Sleeping 😴", "😴"),
+                            Pair("Exercising 🏃", "🏃")
+                        )
+                        LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                            contentPadding = PaddingValues(horizontal = 2.dp)
                         ) {
-                            val userPresets = listOf(
-                                Pair("Coding 🧠", "🧠"),
-                                Pair("Coffee Break ☕", "☕"),
-                                Pair("Chilling 🍃", "🍃"),
-                                Pair("Loving You ❤️", "❤️"),
-                                Pair("Tired & Sleeping 😴", "😴"),
-                                Pair("Exercising 🏃", "🏃")
-                            )
-                            userPresets.forEach { preset ->
+                            items(userPresets, key = { it.first }) { preset ->
                                 SuggestionChip(
                                     onClick = {
                                         userStatusVibe = preset.first
@@ -1100,19 +1122,19 @@ fun DashboardScreen(viewModel: MainViewModel) {
                     ) {
                         Text("Simulate Partner Action:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Spacer(modifier = Modifier.height(6.dp))
-                        Row(
+                        val gfPresets = listOf(
+                            Pair("Learning Compose 📚", "📚"),
+                            Pair("Shopping 🛍️", "🛍️"),
+                            Pair("Happy Hour 🎉", "🎉"),
+                            Pair("Napping 😴", "😴"),
+                            Pair("Missing You 💕", "💕"),
+                            Pair("Gym Workout 💪", "💪")
+                        )
+                        LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                            contentPadding = PaddingValues(horizontal = 2.dp)
                         ) {
-                            val gfPresets = listOf(
-                                Pair("Learning Compose 📚", "📚"),
-                                Pair("Shopping 🛍️", "🛍️"),
-                                Pair("Happy Hour 🎉", "🎉"),
-                                Pair("Napping 😴", "😴"),
-                                Pair("Missing You 💕", "💕"),
-                                Pair("Gym Workout 💪", "💪")
-                            )
-                            gfPresets.forEach { preset ->
+                            items(gfPresets, key = { it.first }) { preset ->
                                 SuggestionChip(
                                     onClick = {
                                         gfStatusVibe = preset.first
@@ -1745,7 +1767,6 @@ fun DashboardScreen(viewModel: MainViewModel) {
                 }
             }
         }
-        item { Spacer(modifier = Modifier.height(24.dp)) }
     }
 }
 
