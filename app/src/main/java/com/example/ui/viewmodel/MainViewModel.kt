@@ -12,7 +12,6 @@ import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
 import com.example.data.model.CalendarTask
 import com.example.data.repository.AppRepository
-import com.example.data.remote.SupabaseConnectionResult
 import com.example.data.remote.SupabaseSyncManager
 import com.example.data.remote.SupabaseSyncState
 import com.example.network.GeminiService
@@ -169,14 +168,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // --- Supabase Actions ---
     val supabaseSyncState: StateFlow<SupabaseSyncState> = supabaseSyncManager.syncState
 
-    fun saveSupabaseCredentials(url: String, key: String) {
-        supabaseSyncManager.saveCredentials(url, key)
-    }
-
-    fun clearSupabaseCredentials() {
-        supabaseSyncManager.clearCredentials()
-    }
-
     fun saveGeminiApiKey(key: String) {
         _customGeminiApiKey.value = key
         sharedPrefs.edit().putString("custom_gemini_api_key", key).apply()
@@ -207,10 +198,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetSupabaseState() {
         supabaseSyncManager.resetState()
-    }
-
-    suspend fun testSupabaseConnection(url: String? = null, key: String? = null): SupabaseConnectionResult {
-        return supabaseSyncManager.testConnection(url, key)
     }
 
     // --- Database Mutations ---
@@ -292,7 +279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (password.length < 6) return "Password must be at least 6 characters"
         if (name.trim().isEmpty()) return "Name cannot be empty"
 
-        if (!supabaseSyncManager.isConfigured()) return "Secure sign-in is unavailable until Supabase is configured"
+        if (!supabaseSyncManager.isConfigured()) return "Secure sign-in is unavailable in this app build"
         val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = true)
         if (authError != null) return authError
         accountsPrefs.edit()
@@ -333,7 +320,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (cleanEmail.isEmpty()) return "Email cannot be empty"
         if (password.isEmpty()) return "Password cannot be empty"
 
-        if (!supabaseSyncManager.isConfigured()) return "Secure sign-in is unavailable until Supabase is configured"
+        if (!supabaseSyncManager.isConfigured()) return "Secure sign-in is unavailable in this app build"
         val authError = supabaseSyncManager.authenticateWithSupabase(cleanEmail, password, createAccount = false)
         if (authError != null) return authError
         var name = accountsPrefs.getString("acc_name_$cleanEmail", null)
@@ -479,7 +466,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _loveStartDate.value = ""
 
             sharedPrefs.edit().clear().apply()
-            supabaseSyncManager.clearCredentials()
+            supabaseSyncManager.clearAuthSession()
             accountsPrefs.edit().remove("acc_pwd_$email").apply()
 
             // Clear current database values cleanly on Thread Pool

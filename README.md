@@ -15,8 +15,8 @@ If the old repository version was ever built or distributed, rotate the exposed 
 1. Open the [new Supabase project dashboard](https://supabase.com/dashboard/project/xmikjxgzxbdmfjxiqanx).
 2. Run the table definitions in [`supabase/schema.sql`](supabase/schema.sql) from the authenticated Supabase SQL Editor. A publishable key can read/write data only when matching RLS policies exist; it cannot create tables.
 3. Configure authentication and Row Level Security policies before production use. The current Android code does not yet establish a Supabase Auth session, so do not enable broad anonymous read/write policies for real user data.
-4. Copy `.env.example` to `.env` locally and set `SUPABASE_URL` plus the publishable/anon key. `.env` is ignored by Git.
-5. Alternatively, users can enter the project URL and publishable/anon key in the app's connection settings.
+4. Copy `.env.example` to `.env` locally and set `SUPABASE_URL` plus the publishable/anon key. `.env` is ignored by Git. These values are baked into the APK at build time; **end users do not enter Supabase credentials in the app**.
+5. Rebuild the APK after changing `.env` so the new key is included.
 
 ## Build locally
 
