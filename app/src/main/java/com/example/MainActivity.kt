@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.example.data.model.*
+import com.example.data.remote.SupabaseConnectionResult
 import com.example.data.remote.SupabaseSyncState
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
@@ -3396,7 +3397,7 @@ fun ProfilesScreen(viewModel: MainViewModel) {
 
     var supabaseUrl by remember { mutableStateOf(viewModel.supabaseSyncManager.getSupabaseUrl()) }
     var supabaseKey by remember { mutableStateOf(viewModel.supabaseSyncManager.getSupabaseAnonKey()) }
-    var testResult by remember { mutableStateOf<Boolean?>(null) }
+    var connectionResult by remember { mutableStateOf<SupabaseConnectionResult?>(null) }
     var isTestingConnection by remember { mutableStateOf(false) }
     var isSqlExpanded by remember { mutableStateOf(false) }
     var showAdminPortal by remember { mutableStateOf(false) }
@@ -3404,6 +3405,25 @@ fun ProfilesScreen(viewModel: MainViewModel) {
     val customGeminiApiKeyFlow by viewModel.customGeminiApiKey.collectAsStateWithLifecycle()
     var customGeminiKey by remember(customGeminiApiKeyFlow) { mutableStateOf(customGeminiApiKeyFlow) }
     val scope = rememberCoroutineScope()
+
+    suspend fun runSupabaseConnectionCheck() {
+        if (supabaseUrl.isBlank() || supabaseKey.isBlank()) {
+            connectionResult = SupabaseConnectionResult(
+                success = false,
+                summary = "Enter your Supabase URL and publishable key to test the connection."
+            )
+            return
+        }
+        isTestingConnection = true
+        connectionResult = viewModel.testSupabaseConnection(supabaseUrl, supabaseKey)
+        isTestingConnection = false
+    }
+
+    LaunchedEffect(Unit) {
+        if (viewModel.isSupabaseConfigured() || (supabaseUrl.isNotBlank() && supabaseKey.isNotBlank())) {
+            runSupabaseConnectionCheck()
+        }
+    }
 
     // Synchronize initial values once profiles load
     LaunchedEffect(profiles) {
@@ -3700,7 +3720,7 @@ fun ProfilesScreen(viewModel: MainViewModel) {
 
             OutlinedTextField(
                 value = supabaseUrl,
-                onValueChange = { supabaseUrl = it ; testResult = null },
+                onValueChange = { supabaseUrl = it ; connectionResult = null },
                 label = { Text("Supabase Base URL") },
                 placeholder = { Text("https://your-project.supabase.co") },
                 modifier = Modifier.fillMaxWidth(),
@@ -3717,7 +3737,7 @@ fun ProfilesScreen(viewModel: MainViewModel) {
 
             OutlinedTextField(
                 value = supabaseKey,
-                onValueChange = { supabaseKey = it ; testResult = null },
+                onValueChange = { supabaseKey = it ; connectionResult = null },
                 label = { Text("Supabase Anon Public Key") },
                 placeholder = { Text("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...") },
                 modifier = Modifier.fillMaxWidth(),
@@ -3739,7 +3759,7 @@ fun ProfilesScreen(viewModel: MainViewModel) {
                 Button(
                     onClick = {
                         viewModel.saveSupabaseCredentials(supabaseUrl, supabaseKey)
-                        testResult = null
+                        scope.launch { runSupabaseConnectionCheck() }
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp),
@@ -3754,7 +3774,7 @@ fun ProfilesScreen(viewModel: MainViewModel) {
                         viewModel.clearSupabaseCredentials()
                         supabaseUrl = ""
                         supabaseKey = ""
-                        testResult = null
+                        connectionResult = null
                         viewModel.resetSupabaseState()
                     },
                     modifier = Modifier.weight(1f),
@@ -3767,48 +3787,63 @@ fun ProfilesScreen(viewModel: MainViewModel) {
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Test Connection Button
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            isTestingConnection = true
-                            testResult = viewModel.testSupabaseConnection()
-                            isTestingConnection = false
-                        }
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x0FFFFFFF)),
-                    enabled = supabaseUrl.isNotBlank() && supabaseKey.isNotBlank() && !isTestingConnection
+            connectionResult?.let { result ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (result.success) Color(0x1200E676) else Color(0x12FF5252),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    if (isTestingConnection) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = CosmicCyan, strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Verifying...", fontSize = 12.sp, color = Color.White)
-                    } else {
-                        Text("Test Connection ⚡", fontSize = 12.sp, color = Color.White)
+                    Icon(
+                        imageVector = if (result.success) Icons.Filled.CheckCircle else Icons.Filled.Error,
+                        contentDescription = null,
+                        tint = if (result.success) Color(0xFF00E676) else Color(0xFFFF5252),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (result.success) "Supabase connected" else "Supabase not connected",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (result.success) Color(0xFF00E676) else Color(0xFFFF5252)
+                        )
+                        Text(
+                            text = result.summary,
+                            fontSize = 11.sp,
+                            color = SecondaryTextLavender,
+                            lineHeight = 15.sp
+                        )
                     }
                 }
+                Spacer(modifier = Modifier.height(10.dp))
+            } else if (isTestingConnection) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = CosmicCyan, strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Checking Supabase connection...", fontSize = 12.sp, color = CosmicCyan)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
-                testResult?.let { connected ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(if (connected) Color(0xFF00E676) else Color(0xFFFF5252), CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (connected) "Connected 🟢" else "Connection Failed 🔴",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (connected) Color(0xFF00E676) else Color(0xFFFF5252)
-                        )
-                    }
+            // Test Connection Button
+            Button(
+                onClick = { scope.launch { runSupabaseConnectionCheck() } },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0x0FFFFFFF)),
+                enabled = supabaseUrl.isNotBlank() && supabaseKey.isNotBlank() && !isTestingConnection
+            ) {
+                if (isTestingConnection) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = CosmicCyan, strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Verifying...", fontSize = 12.sp, color = Color.White)
+                } else {
+                    Text("Test Connection Again ⚡", fontSize = 12.sp, color = Color.White)
                 }
             }
 
