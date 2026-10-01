@@ -12,6 +12,7 @@ import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
 import com.example.data.model.CalendarTask
 import com.example.data.repository.AppRepository
+import com.example.data.remote.SupabaseConnectionResult
 import com.example.data.remote.SupabaseSyncManager
 import com.example.data.remote.SupabaseSyncState
 import com.example.network.GeminiService
@@ -208,8 +209,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         supabaseSyncManager.resetState()
     }
 
-    suspend fun testSupabaseConnection(): Boolean {
-        return supabaseSyncManager.testConnection()
+    suspend fun testSupabaseConnection(url: String? = null, key: String? = null): SupabaseConnectionResult {
+        return supabaseSyncManager.testConnection(url, key)
     }
 
     // --- Database Mutations ---

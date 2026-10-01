@@ -28,6 +28,14 @@ sealed class SupabaseSyncState {
     data class Error(val errorReason: String) : SupabaseSyncState()
 }
 
+data class SupabaseConnectionResult(
+    val success: Boolean,
+    val summary: String,
+    val httpCode: Int? = null,
+    val authKeyValid: Boolean = false,
+    val databaseReachable: Boolean = false
+)
+
 private data class SupabaseAuthUser(val id: String? = null)
 private data class SupabaseAuthSession(val access_token: String? = null, val refresh_token: String? = null, val user: SupabaseAuthUser? = null)
 
@@ -116,6 +124,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             !url.contains("your-project", ignoreCase = true) &&
             looksLikePublicKey &&
             !key.contains("your-anon-public-key", ignoreCase = true) &&
+            !key.contains("your-publishable-key", ignoreCase = true) &&
             !key.contains("MY_", ignoreCase = true)
     }
 
@@ -134,25 +143,90 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
     // Validate the public key against Supabase Auth, not /rest/v1/.
     // Table reads are intentionally checked separately because RLS may deny anon access.
-    suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
-        val url = getSupabaseUrl().trim().removeSuffix("/")
-        val key = getSupabaseAnonKey().trim()
-        if (url.isBlank() || key.isBlank()) return@withContext false
+    suspend fun testConnection(
+        overrideUrl: String? = null,
+        overrideKey: String? = null
+    ): SupabaseConnectionResult = withContext(Dispatchers.IO) {
+        val url = (overrideUrl?.trim()?.takeIf { it.isNotBlank() } ?: getSupabaseUrl().trim()).removeSuffix("/")
+        val key = (overrideKey?.trim()?.takeIf { it.isNotBlank() } ?: getSupabaseAnonKey().trim())
+            .trim('"', '\'')
+            .removePrefix("Bearer ")
+            .removePrefix("bearer ")
+            .trim()
+
+        if (url.isBlank() || key.isBlank()) {
+            return@withContext SupabaseConnectionResult(
+                success = false,
+                summary = "Add your Supabase project URL and publishable (anon) key, then tap Save Config."
+            )
+        }
+        if (!url.startsWith("https://")) {
+            return@withContext SupabaseConnectionResult(
+                success = false,
+                summary = "Supabase URL must start with https://"
+            )
+        }
 
         try {
-            val request = Request.Builder()
+            val authRequest = Request.Builder()
                 .url("$url/auth/v1/settings")
                 .header("apikey", key)
                 .header("Authorization", "Bearer $key")
                 .get()
                 .build()
-            client.newCall(request).execute().use { response ->
+            client.newCall(authRequest).execute().use { response ->
                 Log.d("SupabaseSync", "Auth key check returned ${response.code}")
-                return@withContext response.isSuccessful
+                if (!response.isSuccessful) {
+                    val reason = when (response.code) {
+                        401 -> "Invalid publishable/anon key for this project."
+                        404 -> "Project URL not found. Check the Supabase URL."
+                        else -> "Auth check failed (HTTP ${response.code})."
+                    }
+                    return@withContext SupabaseConnectionResult(
+                        success = false,
+                        summary = reason,
+                        httpCode = response.code
+                    )
+                }
             }
+
+            var databaseReachable = false
+            var databaseNote = "Database tables were not verified."
+            runCatching {
+                val tableRequest = buildBaseRequest("user_profiles", "GET", url, key, "select=id&limit=1")
+                    .get()
+                    .build()
+                client.newCall(tableRequest).execute().use { response ->
+                    databaseReachable = response.isSuccessful
+                    databaseNote = when (response.code) {
+                        in 200..299 -> "Database API reachable."
+                        404 -> "Tables missing. Run supabase/schema.sql in the SQL Editor."
+                        401, 403 -> "Key is valid, but Row Level Security blocked anon reads (expected until policies allow access)."
+                        else -> "Database check returned HTTP ${response.code}."
+                    }
+                }
+            }.onFailure {
+                databaseNote = "Could not reach REST API: ${it.localizedMessage ?: "network error"}"
+            }
+
+            val summary = buildString {
+                append("Connected to Supabase. Publishable key is valid.")
+                append(' ')
+                append(databaseNote)
+            }
+            return@withContext SupabaseConnectionResult(
+                success = true,
+                summary = summary.trim(),
+                httpCode = 200,
+                authKeyValid = true,
+                databaseReachable = databaseReachable
+            )
         } catch (e: Exception) {
             Log.e("SupabaseSync", "Connection failed", e)
-            return@withContext false
+            return@withContext SupabaseConnectionResult(
+                success = false,
+                summary = "Unable to reach Supabase. Check internet, URL, and that the project is active."
+            )
         }
     }
 
