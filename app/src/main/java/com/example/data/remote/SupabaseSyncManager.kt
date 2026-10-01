@@ -54,52 +54,17 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
     private val _syncState = MutableStateFlow<SupabaseSyncState>(SupabaseSyncState.Idle)
     val syncState: StateFlow<SupabaseSyncState> = _syncState.asStateFlow()
 
-    // Retrieve configured credentials from SharedPreferences or BuildConfig values supplied at build time.
-    // Never embed a Supabase secret/service-role key in an Android APK.
-    fun getSupabaseUrl(): String {
-        val saved = sharedPrefs.getString("supabase_url_prefs", "") ?: ""
-        if (saved.isNotBlank()) return saved
-        return try {
-            val field = com.example.BuildConfig::class.java.getField("SUPABASE_URL")
-            field.get(null) as? String ?: ""
-        } catch (e: Exception) {
-            ""
-        }
-    }
+    // Build-time credentials only (see SupabaseConfig / local `.env`).
+    fun getSupabaseUrl(): String = SupabaseConfig.projectUrl()
 
-    fun getSupabaseAnonKey(): String {
-        val saved = sharedPrefs.getString("supabase_anon_key_prefs", "") ?: ""
-        if (saved.isNotBlank()) return saved
-        return try {
-            val field = com.example.BuildConfig::class.java.getField("SUPABASE_ANON_KEY")
-            field.get(null) as? String ?: ""
-        } catch (e: Exception) {
-            ""
-        }
-    }
+    fun getSupabaseAnonKey(): String = SupabaseConfig.anonKey()
 
-    fun saveCredentials(url: String, key: String) {
-        val normalizedUrl = url.trim().trim('"', '\'').removeSuffix("/")
-        val normalizedKey = key.trim().trim('"', '\'')
-            .removePrefix("Bearer ")
-            .removePrefix("bearer ")
-            .trim()
+    /** Clears Supabase Auth session tokens only; project URL/key come from the APK build. */
+    fun clearAuthSession() {
         sharedPrefs.edit()
-            .putString("supabase_url_prefs", normalizedUrl)
-            .putString("supabase_anon_key_prefs", normalizedKey)
-            // A session is bound to the previous project/key. Never reuse it after rotation.
             .remove("supabase_access_token")
             .remove("supabase_refresh_token")
             .remove("supabase_user_id")
-            .apply()
-    }
-
-    fun clearCredentials() {
-        sharedPrefs.edit()
-            .remove("supabase_url_prefs")
-            .remove("supabase_anon_key_prefs")
-            .remove("supabase_access_token")
-            .remove("supabase_refresh_token")
             .apply()
     }
 
@@ -116,17 +81,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             .apply()
     }
 
-    fun isConfigured(): Boolean {
-        val url = getSupabaseUrl().trim()
-        val key = getSupabaseAnonKey().trim().trim('"', '\'')
-        val looksLikePublicKey = key.startsWith("eyJ") || key.startsWith("sb_publishable_")
-        return url.startsWith("https://") &&
-            !url.contains("your-project", ignoreCase = true) &&
-            looksLikePublicKey &&
-            !key.contains("your-anon-public-key", ignoreCase = true) &&
-            !key.contains("your-publishable-key", ignoreCase = true) &&
-            !key.contains("MY_", ignoreCase = true)
-    }
+    fun isConfigured(): Boolean = SupabaseConfig.isConfigured()
 
     // --- Dynamic Raw Client Implementations ---
 
