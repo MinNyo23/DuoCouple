@@ -1150,7 +1150,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "Background sharing on — keep the notification while away from the app."
         } else {
             LocationSharingForegroundService.stop(getApplication())
-            viewModelScope.launch { partnerLocationPublisher.publishSharingPaused() }
+            viewModelScope.launch {
+                partnerLocationPublisher.publishSharingPaused()
+                _locationStatusMessage.value = "Location sharing paused."
+            }
         }
     }
 
@@ -1160,11 +1163,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onLocationPermissionResult(granted: Boolean) {
         if (granted) {
-            setLocationSharingEnabled(true)
-            _locationStatusMessage.value = "Location permission granted."
+            _locationStatusMessage.value = "Permissions granted for background sharing."
         } else {
-            setLocationSharingEnabled(false)
-            _locationStatusMessage.value = "Location permission is required to share your position."
+            if (_locationSharingEnabled.value) {
+                setLocationSharingEnabled(false)
+            }
+            _locationStatusMessage.value = "Location, notification, and background access are required."
         }
     }
 

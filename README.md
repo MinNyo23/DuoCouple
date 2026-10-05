@@ -19,7 +19,7 @@ If the old repository version was ever built or distributed, rotate the exposed 
 5. Copy `.env.example` to `.env` locally and set `SUPABASE_URL` plus the publishable/anon key. `.env` is ignored by Git. These values are baked into the APK at build time; **end users do not enter Supabase credentials in the app**.
 6. Rebuild the APK after changing `.env` so the new key is included.
 7. **Couple linking:** creator generates a code → partner **Enter Code** → partner taps **Accept partnership on this device** → both devices sync once `couple_pairs.status = active`.
-8. For the **Locate** tab (GPS module), ensure `couple_location_updates` exists (baseline schema + auth RLS script).
+8. For the **Locate** tab (GPS module), ensure `couple_location_updates` exists (baseline schema + auth RLS script). Background sharing uses a **foreground service** (persistent notification) and requests **background location** on Android 10+.
 
 ## Build locally
 

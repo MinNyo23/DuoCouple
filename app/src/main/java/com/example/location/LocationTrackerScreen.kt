@@ -114,7 +114,6 @@ fun LocationTrackerScreen(viewModel: MainViewModel) {
             }
             else -> {
                 viewModel.setLocationSharingEnabled(true)
-                viewModel.onLocationPermissionResult(true)
             }
         }
     }
