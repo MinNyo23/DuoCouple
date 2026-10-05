@@ -91,8 +91,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val locationStatusMessage: StateFlow<String> = _locationStatusMessage.asStateFlow()
 
     // --- UI Controls ---
-    private val _selectedTab = MutableStateFlow(0) // 0: Home, 1: Learn, 2: Ledger, 3: Locate, 4: AI, 5: Settings
+    private val _selectedTab = MutableStateFlow(0) // 0: Home, 1: Learn, 2: Ledger, 3: Locate, 4: Settings
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
+
+    private val _showSavingsCoach = MutableStateFlow(false)
+    val showSavingsCoach: StateFlow<Boolean> = _showSavingsCoach.asStateFlow()
 
     private val _selectedDate = MutableStateFlow("")
     val selectedDate: StateFlow<String> = _selectedDate.asStateFlow()
@@ -169,7 +172,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             seedDefaultAccounts()
             supabaseSyncManager.forcePullFromSupabase()
             seedInitialDatabaseIfEmpty()
-            startTelemetryLoop()
             startPartnerLocationSyncLoop()
             if (_locationSharingEnabled.value) {
                 startLiveLocationUpdates()
@@ -183,6 +185,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectTab(index: Int) {
         _selectedTab.value = index
+    }
+
+    fun openSavingsCoach() {
+        _showSavingsCoach.value = true
+    }
+
+    fun closeSavingsCoach() {
+        _showSavingsCoach.value = false
     }
 
     fun selectDate(dateString: String) {
@@ -313,7 +323,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         accountsPrefs.edit()
             .putString("acc_name_$cleanEmail", name.trim())
             .putString("acc_emoji_$cleanEmail", emoji)
-            .remove("acc_pwd_$cleanEmail")
             .apply()
 
         // Clear old local tables before creating a brand-new user to prevent leftover session leak
@@ -360,7 +369,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             accountsPrefs.edit()
                 .putString("acc_name_$cleanEmail", name)
                 .putString("acc_emoji_$cleanEmail", emoji)
-                .remove("acc_pwd_$cleanEmail")
                 .apply()
         }
 
@@ -408,7 +416,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun updateAccountPassword(email: String, newPasswordPlain: String): Boolean = withContext(Dispatchers.IO) {
         val cleanEmail = email.trim().lowercase()
         if (!supabaseSyncManager.isConfigured() || newPasswordPlain.length < 6) return@withContext false
-        accountsPrefs.edit().remove("acc_pwd_$cleanEmail").apply()
         supabaseSyncManager.updateAuthenticatedPassword(newPasswordPlain)
     }
 
@@ -437,11 +444,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun generateAndSetCoupleCode() {
-        val randomNum = (1000..9999).random()
-        val prefixes = listOf("LOVE", "DUO", "BOND", "SOUL", "COSM")
-        val code = "${prefixes.random()}-$randomNum"
-        _coupleCode.value = code
-        sharedPrefs.edit().putString("couple_code", code).apply()
+        viewModelScope.launch {
+            val randomNum = (1000..9999).random()
+            val prefixes = listOf("LOVE", "DUO", "BOND", "SOUL", "COSM")
+            val code = "${prefixes.random()}-$randomNum".uppercase()
+            _coupleCode.value = code
+            sharedPrefs.edit().putString("couple_code", code).apply()
+            if (supabaseSyncManager.isConfigured()) {
+                supabaseSyncManager.publishCoupleInvite(
+                    com.example.data.model.CoupleInviteRecord(
+                        code = code,
+                        creatorEmail = getActiveUserEmail(),
+                        creatorName = _myProfileName.value,
+                        creatorEmoji = _myProfileEmoji.value
+                    )
+                )
+            }
+        }
+    }
+
+    suspend fun joinWithCoupleCode(code: String): String? {
+        val normalized = code.trim().uppercase()
+        if (normalized.length < 4) return "Enter a valid couple code"
+        if (!supabaseSyncManager.isConfigured()) {
+            return "Cloud pairing is unavailable in this build. Check Supabase configuration."
+        }
+        val invite = supabaseSyncManager.fetchCoupleInvite(normalized)
+            ?: return "Code not found. Ask your partner to generate a new invite."
+        val myEmail = getActiveUserEmail().trim().lowercase()
+        if (invite.creatorEmail.equals(myEmail, ignoreCase = true)) {
+            return "You cannot join using your own code. Your partner should enter this code on their phone."
+        }
+        completeCoupling(invite.creatorName, invite.creatorEmoji)
+        return null
+    }
+
+    suspend fun requestPasswordResetEmail(email: String): String? {
+        val clean = email.trim().lowercase()
+        if (clean.isEmpty() || !android.util.Patterns.EMAIL_ADDRESS.matcher(clean).matches()) {
+            return "Enter a valid email address"
+        }
+        return supabaseSyncManager.requestPasswordReset(clean)
     }
 
     fun completeCoupling(partnerName: String, partnerEmoji: String) {
@@ -495,7 +538,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             sharedPrefs.edit().clear().apply()
             supabaseSyncManager.clearAuthSession()
-            accountsPrefs.edit().remove("acc_pwd_$email").apply()
 
             // Clear current database values cleanly on Thread Pool
             withContext(Dispatchers.IO) {
@@ -968,57 +1010,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         supabaseSyncManager.forcePushToSupabase()
     }
 
-    // --- Admin Portal Telemetry Engine & Helpers ---
-    private val _adminDeviceTelemetries = MutableStateFlow<List<Map<String, Any>>>(emptyList())
-    val adminDeviceTelemetries: StateFlow<List<Map<String, Any>>> = _adminDeviceTelemetries.asStateFlow()
-
     fun getActiveUserEmail(): String {
         return sharedPrefs.getString("active_user_email", "guest@example.com") ?: "guest@example.com"
-    }
-
-    fun triggerTelemetryPush() {
-        viewModelScope.launch {
-            if (!supabaseSyncManager.isConfigured()) return@launch
-            val devId = android.os.Build.ID ?: "simulated_id_${(1000..9999).random()}"
-            val devName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
-            val cpuSimulated = (10..65).random() // Realistic representation of active CPU workload
-
-            // Extract memory heap stats dynamically
-            val totalMemory = Runtime.getRuntime().totalMemory()
-            val freeMemory = Runtime.getRuntime().freeMemory()
-            val usedMemory = (totalMemory - freeMemory).toDouble() / (1024.0 * 1024.0) // RAM usage in Megabytes
-
-            val activeMail = getActiveUserEmail()
-
-            supabaseSyncManager.pushTelemetryToBackend(
-                deviceId = devId,
-                deviceName = devName,
-                cpuUsage = cpuSimulated,
-                ramUsage = usedMemory,
-                userEmail = activeMail
-            )
-        }
-    }
-
-    fun startTelemetryLoop() {
-        viewModelScope.launch {
-            while (true) {
-                if (isLoggedIn.value) {
-                    triggerTelemetryPush()
-                }
-                kotlinx.coroutines.delay(20000) // sync telemetry and heartbeat every 20 seconds
-            }
-        }
-    }
-
-    fun fetchAdminTelemetries() {
-        viewModelScope.launch {
-            if (!supabaseSyncManager.isConfigured()) return@launch
-            val list = supabaseSyncManager.fetchAllTelemetriesFromBackend()
-            if (list != null) {
-                _adminDeviceTelemetries.value = list
-            }
-        }
     }
 
     // --- Duo location tracker module ---

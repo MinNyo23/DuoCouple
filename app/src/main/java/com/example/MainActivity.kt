@@ -52,6 +52,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.example.data.model.*
+import com.example.ui.navigation.AppNavigationContent
+import com.example.ui.navigation.CoupleNavigationBar
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -230,11 +232,12 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val isLoggedIn by viewModel.isLoggedIn.collectAsStateWithLifecycle()
                 val isCoupled by viewModel.isCoupled.collectAsStateWithLifecycle()
+                val showSavingsCoach by viewModel.showSavingsCoach.collectAsStateWithLifecycle()
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     bottomBar = { 
-                        if (isLoggedIn && isCoupled) {
+                        if (isLoggedIn && isCoupled && !showSavingsCoach) {
                             CoupleNavigationBar(viewModel)
                         }
                     }
@@ -277,78 +280,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// --- Dynamic Navigation Routing ---
-@Composable
-fun AppNavigationContent(viewModel: MainViewModel) {
-    val isAppLoading by viewModel.isAppLoading.collectAsStateWithLifecycle()
-    val isLoggedIn by viewModel.isLoggedIn.collectAsStateWithLifecycle()
-    val isCoupled by viewModel.isCoupled.collectAsStateWithLifecycle()
-    val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
-
-    AnimatedContent(
-        modifier = Modifier.fillMaxSize(),
-        targetState = isAppLoading,
-        transitionSpec = {
-            if (targetState == false) {
-                // Smoothly zoom, scale and crossfade out of splash screen into the main experience
-                (fadeIn(animationSpec = tween(750, easing = FastOutSlowInEasing)) +
-                 scaleIn(initialScale = 1.04f, animationSpec = tween(750, easing = FastOutSlowInEasing)))
-                    .togetherWith(
-                        fadeOut(animationSpec = tween(450, easing = FastOutSlowInEasing)) +
-                        scaleOut(targetScale = 0.96f, animationSpec = tween(450, easing = FastOutSlowInEasing))
-                    )
-            } else {
-                fadeIn(animationSpec = tween(500)) togetherWith fadeOut(animationSpec = tween(450))
-            }
-        },
-        label = "LoadingTransition"
-    ) { loading ->
-        if (loading) {
-            LoadingScreen(viewModel)
-        } else {
-            if (!isLoggedIn) {
-                LoginScreen(viewModel)
-            } else if (!isCoupled) {
-                CoupleConnectScreen(viewModel)
-            } else {
-                AnimatedContent(
-                    modifier = Modifier.fillMaxSize(),
-                    targetState = selectedTab,
-                    transitionSpec = {
-                        val duration = 320
-                        if (targetState > initialState) {
-                            (slideInHorizontally(animationSpec = tween(duration, easing = FastOutSlowInEasing)) { width -> (width * 0.12f).toInt() } +
-                             fadeIn(animationSpec = tween(duration, easing = FastOutSlowInEasing)))
-                                .togetherWith(
-                                    slideOutHorizontally(animationSpec = tween(duration - 50, easing = FastOutSlowInEasing)) { width -> (-width * 0.12f).toInt() } +
-                                    fadeOut(animationSpec = tween(duration - 50, easing = FastOutSlowInEasing))
-                                )
-                        } else {
-                            (slideInHorizontally(animationSpec = tween(duration, easing = FastOutSlowInEasing)) { width -> (-width * 0.12f).toInt() } +
-                             fadeIn(animationSpec = tween(duration, easing = FastOutSlowInEasing)))
-                                .togetherWith(
-                                    slideOutHorizontally(animationSpec = tween(duration - 50, easing = FastOutSlowInEasing)) { width -> (width * 0.12f).toInt() } +
-                                    fadeOut(animationSpec = tween(duration - 50, easing = FastOutSlowInEasing))
-                                )
-                        }
-                    },
-                    label = "TabTransition"
-                ) { tab ->
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        when (tab) {
-                            0 -> DashboardScreen(viewModel)
-                            1 -> LearningScreen(viewModel)
-                            2 -> ExpensesScreen(viewModel)
-                            3 -> com.example.location.LocationTrackerScreen(viewModel)
-                            4 -> SavingsAdvisorScreen(viewModel)
-                            5 -> ProfilesScreen(viewModel)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 // --- Glassmorphic Container Element (The GlassCard) ---
 @Composable
@@ -520,8 +451,6 @@ fun DashboardScreen(viewModel: MainViewModel) {
     val learningTasks by viewModel.allLearningTasksFlow.collectAsStateWithLifecycle()
     val loveStartDate by viewModel.loveStartDate.collectAsStateWithLifecycle()
     
-    val aiAdvice by viewModel.aiAdvice.collectAsStateWithLifecycle()
-    val isLoadingAdvice by viewModel.isLoadingAdvice.collectAsStateWithLifecycle()
     val allCalendarTasks by viewModel.allCalendarTasksFlow.collectAsStateWithLifecycle()
 
     val myProfile = profiles.find { it.id == "user" }
@@ -588,10 +517,8 @@ fun DashboardScreen(viewModel: MainViewModel) {
     var userOnlineState by remember { mutableStateOf(true) }
     var showUserVibePicker by remember { mutableStateOf(false) }
 
-    var gfStatusVibe by remember { mutableStateOf("Learning Jetpack Compose 📚") }
-    var gfStatusEmoji by remember { mutableStateOf("📚") }
-    var gfOnlineState by remember { mutableStateOf(true) }
-    var showGfVibePicker by remember { mutableStateOf(false) }
+    val partnerStatusEmoji = gfProfile?.avatarEmoji ?: "🌸"
+    val partnerStatusLine = "Updates from partner's device"
 
     // Interactive Shared Calendar Tasks State
     var showCalendarAddDialog by remember { mutableStateOf(false) }
@@ -1025,16 +952,12 @@ fun DashboardScreen(viewModel: MainViewModel) {
                         )
                     }
 
-                    // Girlfriend Column
+                    // Partner column (read-only; no local simulation)
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .background(Color(0x0AFFFFFF), RoundedCornerShape(16.dp))
                             .border(1.dp, Color(0x12FFFFFF), RoundedCornerShape(16.dp))
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null
-                            ) { showGfVibePicker = !showGfVibePicker }
                             .padding(12.dp)
                     ) {
                         Row(
@@ -1046,31 +969,20 @@ fun DashboardScreen(viewModel: MainViewModel) {
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
-                                    .background(
-                                        if (gfOnlineState) Color(0xFF4CAF50) else Color.Gray,
-                                        CircleShape
-                                    )
+                                    .background(Color(0xFF4CAF50), CircleShape)
                             )
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(gfStatusEmoji, fontSize = 28.sp)
+                            Text(partnerStatusEmoji, fontSize = 28.sp)
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(gfName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                Text(gfStatusVibe, fontSize = 11.sp, color = SecondaryTextLavender, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(partnerStatusLine, fontSize = 11.sp, color = SecondaryTextLavender, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "Tap to cycle activity",
-                            fontSize = 9.sp,
-                            color = SweetheartedPeach,
-                            fontWeight = FontWeight.SemiBold
-                        )
                     }
                 }
 
@@ -1103,43 +1015,6 @@ fun DashboardScreen(viewModel: MainViewModel) {
                                         userStatusVibe = preset.first
                                         userStatusEmoji = preset.second
                                         showUserVibePicker = false
-                                    },
-                                    label = { Text(preset.first, fontSize = 10.sp) }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Interactive vibe cycle for Girlfriend
-                AnimatedVisibility(visible = showGfVibePicker) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp)
-                            .background(Color(0x08FFFFFF), RoundedCornerShape(12.dp))
-                            .padding(8.dp)
-                    ) {
-                        Text("Simulate Partner Action:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Spacer(modifier = Modifier.height(6.dp))
-                        val gfPresets = listOf(
-                            Pair("Learning Compose 📚", "📚"),
-                            Pair("Shopping 🛍️", "🛍️"),
-                            Pair("Happy Hour 🎉", "🎉"),
-                            Pair("Napping 😴", "😴"),
-                            Pair("Missing You 💕", "💕"),
-                            Pair("Gym Workout 💪", "💪")
-                        )
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp)
-                        ) {
-                            items(gfPresets, key = { it.first }) { preset ->
-                                SuggestionChip(
-                                    onClick = {
-                                        gfStatusVibe = preset.first
-                                        gfStatusEmoji = preset.second
-                                        showGfVibePicker = false
                                     },
                                     label = { Text(preset.first, fontSize = 10.sp) }
                                 )
@@ -1596,56 +1471,24 @@ fun DashboardScreen(viewModel: MainViewModel) {
                         )
                     }
                     Button(
-                        onClick = { viewModel.fetchAISavingsAdvice() },
+                        onClick = { viewModel.openSavingsCoach() },
                         colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = !isLoadingAdvice
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text(if (isLoadingAdvice) "Analyzing..." else "Analyze ✨", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Open coach", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 
                 Spacer(modifier = Modifier.height(12.dp))
                 
-                // --- Animated Expenses Pie Chart ---
-                ExpensesPieChart(expenses = expenses, modifier = Modifier.padding(bottom = 16.dp))
-                
-                androidx.compose.animation.AnimatedContent(
-                    targetState = isLoadingAdvice to aiAdvice,
-                    label = "ai_advisor_content",
-                    transitionSpec = {
-                        androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(500)) togetherWith 
-                        androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(500))
-                    }
-                ) { (loading, advice) ->
-                    if (loading) {
-                        Box(modifier = Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = CosmicCyan, modifier = Modifier.size(24.dp))
-                        }
-                    } else if (advice.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
-                                .border(1.dp, Color(0x12FFFFFF), RoundedCornerShape(12.dp))
-                                .padding(14.dp)
-                        ) {
-                            Text(
-                                text = advice,
-                                fontSize = 13.sp,
-                                color = Color.White,
-                                lineHeight = 18.sp
-                            )
-                        }
-                    } else {
-                        Text(
-                            text = "Tap 'Analyze ✨' to get personalized AI advice on your recent spending habits.",
-                            fontSize = 12.sp,
-                            color = SecondaryTextLavender,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
-                    }
-                }
+                ExpensesPieChart(expenses = expenses, modifier = Modifier.padding(bottom = 8.dp))
+
+                Text(
+                    text = "Full savings targets, challenges, and Gemini advice live in the savings coach.",
+                    fontSize = 12.sp,
+                    color = SecondaryTextLavender,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
             }
         }
 
@@ -3080,298 +2923,6 @@ fun ExpensesScreen(viewModel: MainViewModel) {
 }
 
 
-// --- 4. SAVINGS ADVISOR SCREEN (AI COACHING HUB) ---
-@Composable
-fun SavingsAdvisorScreen(viewModel: MainViewModel) {
-    val profiles by viewModel.profilesFlow.collectAsStateWithLifecycle()
-    val savingTasks by viewModel.allSavingTasksFlow.collectAsStateWithLifecycle()
-    val aiAdvice by viewModel.aiAdvice.collectAsStateWithLifecycle()
-    val isLoadingAdvice by viewModel.isLoadingAdvice.collectAsStateWithLifecycle()
-
-    val myProfile = profiles.find { it.id == "user" }
-    val gfProfile = profiles.find { it.id == "girlfriend" }
-
-    val myTargetGoal = myProfile?.monthlySavingGoal ?: 500.0
-    val gfTargetGoal = gfProfile?.monthlySavingGoal ?: 500.0
-    val jointSavingsGoal = myTargetGoal + gfTargetGoal
-
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val todayStr = sdf.format(Date())
-
-    // Calculations for checked savings tasks
-    val completedSavingsReward = savingTasks.filter { it.isCompleted }.sumOf { it.rewardAmount }
-
-    var newSavingsChallengeTitle by remember { mutableStateOf("") }
-    var newSavingsChallengeAmount by remember { mutableStateOf("") }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-    ) {
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Screen Intro
-        Column {
-            Text("Goal Savings Advisor", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("AI micro-insights and savings tasks to hit mutual targets", fontSize = 13.sp, color = SecondaryTextLavender)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Savings Targets Progress Card
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            borderBrush = Brush.linearGradient(colors = listOf(SweetheartedPeach.copy(alpha = 0.5f), ElectricLavender.copy(alpha = 0.1f)))
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("Total Mutual Savings Targets", fontSize = 12.sp, color = SecondaryTextLavender)
-                    Text("$${jointSavingsGoal.toInt()} / month", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                }
-
-                Box(
-                    modifier = Modifier
-                        .background(Color(0x11FFFFFF), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Text("AI Monitored", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ElectricLavender)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Divider(color = Color(0x11FFFFFF))
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Savings Task Accumulations
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("Saved on micro-tasks today", fontSize = 11.sp, color = SecondaryTextLavender)
-                    Text("+$${String.format(Locale.getDefault(), "%.1f", completedSavingsReward)} saved!", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CosmicCyan)
-                }
-                Icon(Icons.Filled.AutoAwesome, contentDescription = "Spark", tint = CosmicCyan)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // AI Advisor Consultation Card
-        Text("AI Savings Analyst Advisor", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 8.dp))
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            borderBrush = Brush.linearGradient(colors = listOf(ElectricLavender.copy(alpha = 0.5f), CosmicCyan.copy(alpha = 0.3f)))
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .background(Color(0x338B6CFF), CircleShape)
-                        .padding(10.dp)
-                ) {
-                    Icon(Icons.Filled.AutoAwesome, contentDescription = "AI Icon", tint = ElectricLavender, modifier = Modifier.size(20.dp))
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text("UsSpace AI Savings Coach", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Deep-scan financial ledger to formulate saving tactics", fontSize = 12.sp, color = SecondaryTextLavender)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // AI Text Output
-            if (aiAdvice.isBlank() && !isLoadingAdvice) {
-                Text(
-                    text = "Request your smart financial checkup! Clicking 'Consult AI Coach' below reviews your budgets, limits, and cash flow to design personalized advice.",
-                    fontSize = 13.sp,
-                    color = SecondaryTextLavender,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            } else if (isLoadingAdvice) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(color = ElectricLavender)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Duo Ledger analytical scan active... 🧠", fontSize = 12.sp, color = SecondaryTextLavender)
-                }
-            } else {
-                // Display the advice safely in scroll text
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0x0CFFFFFF), RoundedCornerShape(12.dp))
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        text = aiAdvice,
-                        fontSize = 13.sp,
-                        color = Color.White,
-                        lineHeight = 18.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Button(
-                onClick = { viewModel.fetchAISavingsAdvice() },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = ElectricLavender),
-                shape = RoundedCornerShape(10.dp),
-                enabled = !isLoadingAdvice
-            ) {
-                Text("Refining/Consult AI Coach ✨", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Saving Tasks/Challenges Board
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Interactive Saving Tasks Tracker", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Add micro challenge field inline
-        GlassCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = newSavingsChallengeTitle,
-                    onValueChange = { newSavingsChallengeTitle = it },
-                    label = { Text("What custom task saves cash?") },
-                    placeholder = { Text("e.g. Carpooled today") },
-                    modifier = Modifier.weight(1f),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CosmicCyan,
-                        unfocusedBorderColor = Color(0x1EFFFFFF),
-                        focusedLabelColor = CosmicCyan,
-                        unfocusedLabelColor = SecondaryTextLavender,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = newSavingsChallengeAmount,
-                    onValueChange = { newSavingsChallengeAmount = it },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    label = { Text("Save amount ($)") },
-                    modifier = Modifier.width(110.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CosmicCyan,
-                        unfocusedBorderColor = Color(0x1EFFFFFF),
-                        focusedLabelColor = CosmicCyan,
-                        unfocusedLabelColor = SecondaryTextLavender,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    singleLine = true
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    val rewardAmt = newSavingsChallengeAmount.toDoubleOrNull()
-                    if (newSavingsChallengeTitle.isNotBlank() && rewardAmt != null && rewardAmt > 0) {
-                        viewModel.addSavingTask("shared", newSavingsChallengeTitle, rewardAmt, todayStr)
-                        newSavingsChallengeTitle = ""
-                        newSavingsChallengeAmount = ""
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Add Saving Micro-task", color = Color(0xFF070511))
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Log of active savings actions
-        if (savingTasks.isEmpty()) {
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "No micro challenges written. Complete targets together to accumulate mutual balances!",
-                    fontSize = 11.sp,
-                    color = SecondaryTextLavender,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(12.dp)
-                )
-            }
-        } else {
-            savingTasks.forEach { task ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .background(Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
-                        .border(0.5.dp, Color(0x13FFFFFF), RoundedCornerShape(12.dp))
-                        .clickable { viewModel.toggleSavingTaskCompletion(task) }
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = if (task.isCompleted) Icons.Filled.CheckCircle else Icons.Filled.AddCircleOutline,
-                            contentDescription = "Selection check",
-                            tint = if (task.isCompleted) CosmicCyan else SecondaryTextLavender,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = task.title,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (task.isCompleted) SecondaryTextLavender else Color.White
-                            )
-                            Text("Saves estimated $${task.rewardAmount}", fontSize = 11.sp, color = CosmicCyan)
-                        }
-                    }
-
-                    IconButton(
-                        onClick = { viewModel.deleteSavingTask(task.id) }
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Remove challenge", tint = Color(0x44FF3F3F), modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(30.dp))
-    }
-}
-
-
 // --- 5. PROFILES SCREEN (PARTNER PERSONALIZATION) ---
 @Composable
 fun ProfilesScreen(viewModel: MainViewModel) {
@@ -3394,7 +2945,6 @@ fun ProfilesScreen(viewModel: MainViewModel) {
     val myImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> myImageUri = uri?.toString() }
     val gfImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> gfImageUri = uri?.toString() }
 
-    var showAdminPortal by remember { mutableStateOf(false) }
     val customGeminiApiKeyFlow by viewModel.customGeminiApiKey.collectAsStateWithLifecycle()
     var customGeminiKey by remember(customGeminiApiKeyFlow) { mutableStateOf(customGeminiApiKeyFlow) }
 
@@ -3739,39 +3289,6 @@ fun ProfilesScreen(viewModel: MainViewModel) {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Open Superuser Admin Portal Card
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            borderBrush = Brush.linearGradient(colors = listOf(SweetheartedPeach.copy(alpha = 0.5f), CosmicCyan.copy(alpha = 0.5f)))
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("Superuser Operations Desk 🛡️", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("Check user login count, live device node metrics, CPU profiles, and configure web views.", fontSize = 11.sp, color = SecondaryTextLavender)
-                    }
-                    Button(
-                        onClick = { showAdminPortal = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text("Open Desk", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-
-        if (showAdminPortal) {
-            AdminPortalDialog(viewModel, onDismiss = { showAdminPortal = false })
-        }
-
         Spacer(modifier = Modifier.height(24.dp))
 
         // Technical Security Warnings
@@ -3787,75 +3304,6 @@ fun ProfilesScreen(viewModel: MainViewModel) {
     }
 }
 
-
-// --- REUSABLE GLASS BOTTOM NAVIGATION BAR ---
-@Composable
-fun CoupleNavigationBar(viewModel: MainViewModel) {
-    val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
-
-    val navBarBorderBrush = Brush.linearGradient(
-        colors = listOf(Color(0x2AFFFFFF), Color(0x05FFFFFF))
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.navigationBars) // Respect Android Safe gesture bar spacing
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .background(
-                color = Color(0x1FFFFFFF), // Translucent backdrop blur layer
-                shape = RoundedCornerShape(20.dp)
-            )
-            .border(
-                width = 1.dp,
-                brush = navBarBorderBrush,
-                shape = RoundedCornerShape(20.dp)
-            )
-            .clip(RoundedCornerShape(20.dp))
-            .padding(vertical = 4.dp, horizontal = 12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val navItems = listOf(
-                Triple("Home", Icons.Filled.Home, 0),
-                Triple("Learn", Icons.Filled.MenuBook, 1),
-                Triple("Ledger", Icons.Filled.AttachMoney, 2),
-                Triple("Locate", Icons.Filled.LocationOn, 3),
-                Triple("AI", Icons.Filled.AutoAwesome, 4),
-                Triple("Setup", Icons.Filled.Settings, 5)
-            )
-
-            navItems.forEach { (title, icon, index) ->
-                val isSelected = selectedTab == index
-                val itemThemeColor = if (index % 2 == 0) ElectricLavender else CosmicCyan
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable { viewModel.selectTab(index) }
-                        .padding(vertical = 4.dp, horizontal = 8.dp)
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = title,
-                        tint = if (isSelected) itemThemeColor else SecondaryTextLavender,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = title,
-                        fontSize = 9.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) Color.White else SecondaryTextLavender
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun RoadmapCard(roadmap: LearningRoadmap, viewModel: MainViewModel) {
@@ -3989,32 +3437,9 @@ fun LoginScreen(viewModel: MainViewModel) {
 
     var showForgotPassword by remember { mutableStateOf(false) }
     var forgotEmail by remember { mutableStateOf("") }
-    var forgotCodeInput by remember { mutableStateOf("") }
-    var forgotNewPassword by remember { mutableStateOf("") }
-    var forgotConfirmPassword by remember { mutableStateOf("") }
-    var forgotStep by remember { mutableStateOf(1) } // 1: Email Request, 2: Code verification, 3: Set Password
-    var generatedCode by remember { mutableStateOf("") }
     var forgotError by remember { mutableStateOf<String?>(null) }
     var forgotStatus by remember { mutableStateOf<String?>(null) }
-    var isSendingAnimation by remember { mutableStateOf(false) }
-    var smtpLogs by remember { mutableStateOf<List<String>>(emptyList()) }
-    val context = androidx.compose.ui.platform.LocalContext.current
-
-    fun sendResetEmailIntent(targetEmail: String, code: String) {
-        val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
-            data = android.net.Uri.parse("mailto:")
-            putExtra(android.content.Intent.EXTRA_EMAIL, arrayOf(targetEmail))
-            putExtra(android.content.Intent.EXTRA_SUBJECT, "UsSpace Password Reset Verification Code")
-            putExtra(android.content.Intent.EXTRA_TEXT, "Hello,\n\nYou requested a password reset for your UsSpace account.\n\nYour 6-digit confirmation code is: $code\n\nPlease enter this security code in your app to unlock your credentials and configure a new password.\n\nWith love,\nUsSpace security services")
-        }
-        try {
-            val chooser = android.content.Intent.createChooser(intent, "Send Reset Mail via...")
-            chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(chooser)
-        } catch (e: Throwable) {
-            android.util.Log.e("LoveTracker", "Failed to launch mail chooser: ${e.message}", e)
-        }
-    }
+    var isSendingReset by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -4219,7 +3644,6 @@ fun LoginScreen(viewModel: MainViewModel) {
                                 forgotEmail = email
                                 forgotError = null
                                 forgotStatus = null
-                                forgotStep = 1
                                 showForgotPassword = true
                             }
                             .padding(vertical = 4.dp)
@@ -4370,7 +3794,7 @@ fun LoginScreen(viewModel: MainViewModel) {
 
     if (showForgotPassword) {
         AlertDialog(
-            onDismissRequest = { if (!isSendingAnimation) showForgotPassword = false },
+            onDismissRequest = { if (!isSendingReset) showForgotPassword = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
@@ -4381,7 +3805,7 @@ fun LoginScreen(viewModel: MainViewModel) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Reset Password Link",
+                        text = "Reset password",
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
@@ -4412,163 +3836,36 @@ fun LoginScreen(viewModel: MainViewModel) {
                         )
                     }
 
-                    if (forgotStep == 1) {
-                        Text(
-                            text = "Enter your registered email address to receive a secure password recovery code directly to your email application.",
-                            color = SecondaryTextLavender,
-                            fontSize = 13.sp
-                        )
+                    Text(
+                        text = "We will email a secure reset link through Supabase Auth. Open the link on this device to choose a new password.",
+                        color = SecondaryTextLavender,
+                        fontSize = 13.sp
+                    )
 
-                        OutlinedTextField(
-                            value = forgotEmail,
-                            onValueChange = { forgotEmail = it; forgotError = null },
-                            label = { Text("Registered Email Address") },
-                            placeholder = { Text("your.email@example.com") },
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Email
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ElectricLavender,
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedLabelColor = ElectricLavender,
-                                unfocusedLabelColor = SecondaryTextLavender,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
+                    OutlinedTextField(
+                        value = forgotEmail,
+                        onValueChange = { forgotEmail = it; forgotError = null },
+                        label = { Text("Registered email") },
+                        placeholder = { Text("your.email@example.com") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Email
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ElectricLavender,
+                            unfocusedBorderColor = Color(0x33FFFFFF),
+                            focusedLabelColor = ElectricLavender,
+                            unfocusedLabelColor = SecondaryTextLavender,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
 
-                        if (isSendingAnimation) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            // Interactive Futuristic SMTP logs terminal output
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(110.dp)
-                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                                    .border(1.dp, ElectricLavender.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                                    .padding(8.dp)
-                            ) {
-                                androidx.compose.foundation.lazy.LazyColumn(
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    items(smtpLogs) { log ->
-                                        Text(
-                                            text = log,
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                            fontSize = 9.sp,
-                                            color = if (log.startsWith("ERR:")) Color(0xFFFF5252) else if (log.contains("Success")) CosmicCyan else Color.Green
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } else if (forgotStep == 2) {
-                        Text(
-                            text = "A password recovery code has been generated and queued for delivery. Check your device's email client. Enter the 6-digit code below to set your new password.",
-                            color = SecondaryTextLavender,
-                            fontSize = 13.sp
-                        )
-
-                        // Highlight fallback code beautifully on UI
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(ElectricLavender.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                                .border(1.dp, ElectricLavender.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                                .padding(12.dp)
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                Text("YOUR SECURE ACCESS OTP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CosmicCyan)
-                                Text(generatedCode, fontSize = 28.sp, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 4.sp)
-                                Text("Check your email app to simulate real mail dispatch.", fontSize = 11.sp, color = SecondaryTextLavender)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        OutlinedTextField(
-                            value = forgotCodeInput,
-                            onValueChange = { forgotCodeInput = it; forgotError = null },
-                            label = { Text("6-Digit Verification Code") },
-                            placeholder = { Text("e.g. 000000") },
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ElectricLavender,
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedLabelColor = ElectricLavender,
-                                unfocusedLabelColor = SecondaryTextLavender,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        Button(
-                            onClick = {
-                                sendResetEmailIntent(forgotEmail, generatedCode)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x1F8B6CFF)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, ElectricLavender)
-                        ) {
-                            Icon(Icons.Filled.Mail, contentDescription = "Mail Icon", tint = Color.White, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Re-open External Mail App", color = Color.White, fontSize = 13.sp)
-                        }
-                    } else if (forgotStep == 3) {
-                        Text(
-                            text = "Choose a secure, brand-new password for your UsSpace profile account.",
-                            color = SecondaryTextLavender,
-                            fontSize = 13.sp
-                        )
-
-                        OutlinedTextField(
-                            value = forgotNewPassword,
-                            onValueChange = { forgotNewPassword = it; forgotError = null },
-                            label = { Text("Choose New Password") },
-                            placeholder = { Text("at least 6 characters") },
-                            modifier = Modifier.fillMaxWidth(),
-                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ElectricLavender,
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedLabelColor = ElectricLavender,
-                                unfocusedLabelColor = SecondaryTextLavender,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        OutlinedTextField(
-                            value = forgotConfirmPassword,
-                            onValueChange = { forgotConfirmPassword = it; forgotError = null },
-                            label = { Text("Confirm New Password") },
-                            placeholder = { Text("repeat chosen password") },
-                            modifier = Modifier.fillMaxWidth(),
-                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ElectricLavender,
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedLabelColor = ElectricLavender,
-                                unfocusedLabelColor = SecondaryTextLavender,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
+                    if (isSendingReset) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                            color = ElectricLavender
                         )
                     }
                 }
@@ -4577,79 +3874,30 @@ fun LoginScreen(viewModel: MainViewModel) {
                 Button(
                     onClick = {
                         scope.launch {
-                            if (forgotStep == 1) {
-                                val emailExists = viewModel.verifyEmailExists(forgotEmail)
-                                if (!emailExists) {
-                                    forgotError = "The provided email address is not registered."
-                                    return@launch
-                                }
-                                
-                                isSendingAnimation = true
-                                smtpLogs = listOf("> Initiating connection to gateway...")
-                                kotlinx.coroutines.delay(400)
-                                smtpLogs = smtpLogs + "> TLS Handshake complete (Port 587)"
-                                kotlinx.coroutines.delay(400)
-                                smtpLogs = smtpLogs + "> Auth credentials handshake authorized"
-                                kotlinx.coroutines.delay(400)
-                                
-                                val otp = (100000..999999).random().toString()
-                                generatedCode = otp
-                                
-                                smtpLogs = smtpLogs + "> Enqueueing outbound envelope standard spool"
-                                kotlinx.coroutines.delay(400)
-                                smtpLogs = smtpLogs + "> Success! Reset mail dispatched to $forgotEmail"
-                                kotlinx.coroutines.delay(600)
-                                
-                                isSendingAnimation = false
-                                forgotStep = 2
-                                sendResetEmailIntent(forgotEmail, otp)
-                            } else if (forgotStep == 2) {
-                                if (forgotCodeInput.trim() == generatedCode) {
-                                    forgotStep = 3
-                                } else {
-                                    forgotError = "Invalid verification code. Please try again."
-                                }
-                            } else if (forgotStep == 3) {
-                                if (forgotNewPassword.length < 6) {
-                                    forgotError = "Password must be at least 6 characters"
-                                    return@launch
-                                }
-                                if (forgotNewPassword != forgotConfirmPassword) {
-                                    forgotError = "Passwords do not match"
-                                    return@launch
-                                }
-                                val ok = viewModel.updateAccountPassword(forgotEmail, forgotNewPassword)
-                                if (ok) {
-                                    forgotStatus = "Password successfully reset! Returning to Login..."
-                                    kotlinx.coroutines.delay(1800)
-                                    showForgotPassword = false
-                                    // Pre-populate login form email automatic convenience!
-                                    email = forgotEmail
-                                } else {
-                                    forgotError = "Failed to synchronize new credentials onto backed services."
-                                }
+                            isSendingReset = true
+                            forgotError = null
+                            forgotStatus = null
+                            val err = viewModel.requestPasswordResetEmail(forgotEmail)
+                            isSendingReset = false
+                            if (err != null) {
+                                forgotError = err
+                            } else {
+                                forgotStatus = "If that email is registered, a reset link is on its way. Check your inbox."
+                                email = forgotEmail
                             }
                         }
                     },
-                    enabled = !isSendingAnimation,
+                    enabled = !isSendingReset,
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricLavender),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text(
-                        text = when (forgotStep) {
-                            1 -> "Send Code"
-                            2 -> "Verify OTP"
-                            else -> "Save Password"
-                        },
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Text("Send reset link", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(
                     onClick = { showForgotPassword = false },
-                    enabled = !isSendingAnimation
+                    enabled = !isSendingReset
                 ) {
                     Text("Cancel", color = SecondaryTextLavender)
                 }
@@ -4667,9 +3915,9 @@ fun CoupleConnectScreen(viewModel: MainViewModel) {
 
     var activeTab by remember { mutableStateOf(0) } // 0: Create, 1: Join
     var inputCode by remember { mutableStateOf("") }
-    var partnerInputName by remember { mutableStateOf("") }
-    val partnerEmojis = listOf("🦄", "🦊", "🐱", "🐰", "👸", "🐯", "🐼", "🦁")
-    var partnerInputEmoji by remember { mutableStateOf("🦄") }
+    var joinError by remember { mutableStateOf<String?>(null) }
+    var isJoining by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -4847,76 +4095,7 @@ fun CoupleConnectScreen(viewModel: MainViewModel) {
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Awaiting partner to join code...", fontSize = 11.sp, color = SecondaryTextLavender)
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Developer shortcut / immediate simulation of a partner connection!
-                    Text(
-                        text = "Or simulate your sweetheart joining right now locally:",
-                        fontSize = 10.sp,
-                        color = SecondaryTextLavender,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = partnerInputName,
-                        onValueChange = { partnerInputName = it },
-                        label = { Text("Partner's Custom Name") },
-                        placeholder = { Text("e.g. Honey 🌸", color = SecondaryTextLavender) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CosmicCyan,
-                            unfocusedBorderColor = Color(0x33FFFFFF),
-                            focusedLabelColor = CosmicCyan,
-                            unfocusedLabelColor = SecondaryTextLavender,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text("Partner's Avatar Emoji", fontSize = 10.sp, color = SecondaryTextLavender, modifier = Modifier.align(Alignment.Start))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(partnerEmojis) { emoji ->
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .background(
-                                        color = if (partnerInputEmoji == emoji) CosmicCyan.copy(alpha = 0.3f) else Color(0x0AFFFFFF),
-                                        shape = CircleShape
-                                    )
-                                    .border(
-                                        width = if (partnerInputEmoji == emoji) 2.dp else 1.dp,
-                                        brush = if (partnerInputEmoji == emoji) SolidColor(CosmicCyan) else SolidColor(Color(0x1AFFFFFF)),
-                                        shape = CircleShape
-                                    )
-                                    .clickable { partnerInputEmoji = emoji }
-                            ) {
-                                Text(emoji, fontSize = 16.sp)
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Button(
-                        onClick = {
-                            val parName = if (partnerInputName.isBlank()) "Honey 🌸" else partnerInputName
-                            viewModel.completeCoupling(parName, partnerInputEmoji)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan.copy(alpha = 0.8f))
-                    ) {
-                        Text("Connect Sweetheart (Simulated Duo Join) ⚡", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Share the code with your partner. They enter it on their device to link.", fontSize = 11.sp, color = SecondaryTextLavender)
                     }
                 }
             }
@@ -4933,7 +4112,7 @@ fun CoupleConnectScreen(viewModel: MainViewModel) {
 
                 OutlinedTextField(
                     value = inputCode,
-                    onValueChange = { inputCode = it },
+                    onValueChange = { inputCode = it; joinError = null },
                     label = { Text("Couple Code") },
                     placeholder = { Text("e.g. LOVE-4819", color = SecondaryTextLavender) },
                     modifier = Modifier.fillMaxWidth(),
@@ -4945,71 +4124,41 @@ fun CoupleConnectScreen(viewModel: MainViewModel) {
                     shape = RoundedCornerShape(10.dp)
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = partnerInputName,
-                    onValueChange = { partnerInputName = it },
-                    label = { Text("Your Partner's Name") },
-                    placeholder = { Text("e.g. Honey 🌸", color = SecondaryTextLavender) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = ElectricLavender,
-                        unfocusedBorderColor = Color(0x33FFFFFF),
-                        focusedLabelColor = ElectricLavender
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                )
+                joinError?.let { err ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(err, fontSize = 12.sp, color = Color(0xFFFF5252))
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Match Partner's Avatar Emoji",
+                    text = "Your partner's name and avatar are loaded from their invite in Supabase.",
                     fontSize = 11.sp,
-                    color = SecondaryTextLavender,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    color = SecondaryTextLavender
                 )
-
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(partnerEmojis) { emoji ->
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(
-                                    color = if (partnerInputEmoji == emoji) ElectricLavender.copy(alpha = 0.3f) else Color(0x0AFFFFFF),
-                                    shape = CircleShape
-                                )
-                                .border(
-                                    width = if (partnerInputEmoji == emoji) 2.dp else 1.dp,
-                                    brush = if (partnerInputEmoji == emoji) SolidColor(ElectricLavender) else SolidColor(Color(0x1AFFFFFF)),
-                                    shape = CircleShape
-                                )
-                                .clickable { partnerInputEmoji = emoji }
-                        ) {
-                            Text(emoji, fontSize = 16.sp)
-                        }
-                    }
-                }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
                     onClick = {
-                        val parName = if (partnerInputName.isBlank()) "Honey 🌸" else partnerInputName
-                        viewModel.completeCoupling(parName, partnerInputEmoji)
+                        scope.launch {
+                            isJoining = true
+                            joinError = viewModel.joinWithCoupleCode(inputCode)
+                            isJoining = false
+                        }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricLavender),
                     shape = RoundedCornerShape(10.dp),
-                    enabled = inputCode.hasDigitsOrSpecial()
+                    enabled = inputCode.hasDigitsOrSpecial() && !isJoining
                 ) {
-                    Text("Join & Validate Space 🥂", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (isJoining) "Linking..." else "Join partner space",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -5328,490 +4477,5 @@ fun LoadingScreen(viewModel: MainViewModel) {
                 )
             }
         }
-    }
-}
-
-// --- ADMIN PORTAL TELEMETRY & SECURITY CONTROL DESK ---
-@Composable
-fun AdminPortalDialog(viewModel: com.example.ui.viewmodel.MainViewModel, onDismiss: () -> Unit) {
-    val telemetries by viewModel.adminDeviceTelemetries.collectAsStateWithLifecycle()
-    var selectedSubTab by remember { mutableStateOf(0) } // 0: Live Telemetry, 1: Subscribed Nodes, 2: Web Integration
-    val scope = rememberCoroutineScope()
-
-    // Periodically fetch synced device telemetries from Supabase
-    LaunchedEffect(Unit) {
-        viewModel.fetchAdminTelemetries()
-        while (true) {
-            kotlinx.coroutines.delay(5000)
-            viewModel.fetchAdminTelemetries()
-        }
-    }
-
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = true
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF07080D).copy(alpha = 0.98f))
-                .padding(vertical = 12.dp, horizontal = 16.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-            ) {
-                // Header Bar
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(CosmicCyan.copy(alpha = 0.2f), RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Security,
-                                contentDescription = "Active Security",
-                                tint = CosmicCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                "Superuser Telemetry Desk",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .background(Color(0xFF00FF87), CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    "Connected with Supabase Live Sync",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF00FF87)
-                                )
-                            }
-                        }
-                    }
-
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = "Close",
-                            tint = Color.White
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Custom Tab Row controls
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0x14FFFFFF), RoundedCornerShape(10.dp))
-                        .padding(4.dp)
-                ) {
-                    val tabs = listOf("📊 Live Dashboard", "🖥️ Synced Nodes", "🌐 Web Portal")
-                    tabs.forEachIndexed { idx, title ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selectedSubTab == idx) CosmicCyan else Color.Transparent)
-                                .clickable { selectedSubTab = idx }
-                                .padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = title,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (selectedSubTab == idx) Color.Black else Color.White
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Scrollable Dynamic Content viewport
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                ) {
-                    when (selectedSubTab) {
-                        0 -> LiveStatsTab(telemetries)
-                        1 -> NodesTab(telemetries, viewModel)
-                        2 -> WebIntegrationTab()
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Footer actions
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            viewModel.triggerTelemetryPush()
-                            viewModel.fetchAdminTelemetries()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0x11FFFFFF)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh", modifier = Modifier.size(16.dp), tint = Color.White)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Force Telemetry Sync", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun LiveStatsTab(telemetries: List<Map<String, Any>>) {
-    // Elegant dynamic state representations
-    var liveCpuPercent by remember { mutableStateOf(24) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1800)
-            liveCpuPercent = (21..48).random()
-        }
-    }
-
-    val totalAllocatedRam = Runtime.getRuntime().totalMemory().toDouble() / (1024 * 1024)
-    val freeRam = Runtime.getRuntime().freeMemory().toDouble() / (1024 * 1024)
-    val usedRamFraction = (totalAllocatedRam - freeRam) / totalAllocatedRam
-
-    val registeredEmailsCount = remember(telemetries) {
-        telemetries.mapNotNull { it["user_email"]?.toString() }.distinct().size.coerceAtLeast(1)
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // High-fidelity Metrics Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Accounts count summary
-            GlassCard(
-                modifier = Modifier.weight(1f),
-                borderBrush = Brush.linearGradient(colors = listOf(ElectricLavender.copy(alpha = 0.5f), Color.Transparent))
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Filled.People, contentDescription = "Active Users", tint = ElectricLavender, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Total User Accounts", fontSize = 11.sp, color = SecondaryTextLavender, textAlign = TextAlign.Center)
-                    Text("$registeredEmailsCount Active", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            }
-
-            // High priority live network status roundtrip ping representation
-            GlassCard(
-                modifier = Modifier.weight(1f),
-                borderBrush = Brush.linearGradient(colors = listOf(CosmicCyan.copy(alpha = 0.5f), Color.Transparent))
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Filled.Speed, contentDescription = "Hardware Speed Delay", tint = CosmicCyan, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Realtime WebSocket Ping", fontSize = 11.sp, color = SecondaryTextLavender, textAlign = TextAlign.Center)
-                    Text("34ms (Excellent)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            }
-        }
-
-        // Live CPU meter card
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            borderBrush = Brush.linearGradient(colors = listOf(SweetheartedPeach.copy(alpha = 0.5f), Color.Transparent))
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Dynamic CPU Telemetry Center", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("$liveCpuPercent% Load", fontSize = 12.sp, color = SweetheartedPeach, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                // Beautiful linear CPU meter represents the live percentage
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .background(Color(0x19FFFFFF), CircleShape)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth((liveCpuPercent / 100f).coerceIn(0f, 1f))
-                            .fillMaxHeight()
-                            .background(SweetheartedPeach, CircleShape)
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Simulated CPU cycles showing app computational load usage in background thread loops.", fontSize = 10.sp, color = SecondaryTextLavender)
-            }
-        }
-
-        // Real Memory Profiler graph mapping
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            borderBrush = Brush.linearGradient(colors = listOf(CosmicCyan.copy(alpha = 0.5f), Color.Transparent))
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("JVM Process Heap Allocation", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("${"%.1f".format(totalAllocatedRam - freeRam)}MB used", fontSize = 12.sp, color = CosmicCyan, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .background(Color(0x19FFFFFF), CircleShape)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(usedRamFraction.toFloat().coerceIn(0f, 1f))
-                            .fillMaxHeight()
-                            .background(CosmicCyan, CircleShape)
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Allocated size: ${"%.1f".format(totalAllocatedRam)}MB", fontSize = 10.sp, color = SecondaryTextLavender)
-                    Text("Max Heap limit: ${Runtime.getRuntime().maxMemory() / (1024 * 1024)}MB", fontSize = 10.sp, color = SecondaryTextLavender)
-                }
-            }
-        }
-
-        // Security Activity Logger Terminal feed
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            borderBrush = Brush.linearGradient(colors = listOf(Color(0x1EFFFFFF), Color.Transparent))
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Operational Logs Terminal Feed 📃", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Spacer(modifier = Modifier.height(8.dp))
-                val logLines = listOf(
-                    "INFO: Spawn connection channels to local db sync provider",
-                    "INFO: Sync matching database state logs with local persistence mapping",
-                    "INFO: Telemetry scheduler triggered background heartbeat dispatch run",
-                    "INFO: Saved profile email verification token checks: valid",
-                    "DEBUG: Active websocket response matching with latency code 200: success"
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    logLines.forEach { line ->
-                        Text(
-                            text = line,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            fontSize = 9.sp,
-                            color = SecondaryTextLavender.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun NodesTab(telemetries: List<Map<String, Any>>, viewModel: com.example.ui.viewmodel.MainViewModel) {
-    val items = remember(telemetries) {
-        if (telemetries.isEmpty()) {
-            listOf(
-                mapOf(
-                    "device_name" to "Google Pixel 8 Pro",
-                    "device_id" to "SP2A-0902.001",
-                    "user_email" to viewModel.getActiveUserEmail(),
-                    "cpu_usage" to "28",
-                    "ram_usage" to "45.2"
-                ),
-                mapOf(
-                    "device_name" to "Samsung Galaxy S24 Ultra",
-                    "device_id" to "UP1A-1005.008",
-                    "user_email" to "partner.love@example.com",
-                    "cpu_usage" to "14",
-                    "ram_usage" to "56.4"
-                )
-            )
-        } else {
-            telemetries
-        }
-    }
-
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text("Online Synced Devices (${items.size})", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-
-        if (telemetries.isEmpty()) {
-            Text(
-                "Displaying offline simulated nodes since live telemetry data has not arrived on your Supabase table. Connect keys to monitor physical devices.",
-                fontSize = 11.sp,
-                color = SweetheartedPeach,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-        }
-
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(items.size) { index ->
-                val node = items[index]
-                val devName = node["device_name"]?.toString() ?: "Android Emulator"
-                val devId = node["device_id"]?.toString() ?: "unknown"
-                val email = node["user_email"]?.toString() ?: "guest@example.com"
-                val cpu = node["cpu_usage"]?.toString() ?: "18"
-                val ram = node["ram_usage"]?.toString()?.toDoubleOrNull()?.let { "%.1f".format(it) } ?: "32.0"
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    borderBrush = Brush.linearGradient(colors = listOf(CosmicCyan.copy(alpha = 0.3f), Color.Transparent))
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(devName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .background(Color(0xFF00FF87), CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Online", fontSize = 10.sp, color = Color(0xFF00FF87), fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0x14FFFFFF))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text("Active User Email", fontSize = 9.sp, color = SecondaryTextLavender)
-                                Text(email, fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Medium)
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("Hardware Node Identifier", fontSize = 9.sp, color = SecondaryTextLavender)
-                                Text(devId, fontSize = 11.sp, color = Color.White, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("CPU Allocation: $cpu%", fontSize = 11.sp, color = SweetheartedPeach, fontWeight = FontWeight.SemiBold)
-                            Text("Memory Footprint: ${ram}MB", fontSize = 11.sp, color = CosmicCyan, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun WebIntegrationTab() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text("External Web Browser Integration 🌐", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-
-        Text(
-            "Use the Supabase dashboard only for authorized administration. Sensitive account and device data must be protected by Supabase Auth, Row Level Security, and least-privilege access:",
-            fontSize = 11.sp,
-            color = SecondaryTextLavender
-        )
-
-        val steps = listOf(
-            Pair("Step 1", "Access your Supabase dashboard at https://supabase.com/dashboard"),
-            Pair("Step 2", "Open the Table Editor from the left project panel layout."),
-            Pair("Step 3", "Do not store or inspect application passwords in a custom table. Use Supabase Auth for authentication and keep credentials out of application data tables."),
-            Pair("Step 4", "Restrict device telemetry to authorized administrators with RLS or a protected server function; do not expose it through unrestricted browser code.")
-        )
-
-        steps.forEach { step ->
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                borderBrush = Brush.linearGradient(colors = listOf(CosmicCyan.copy(alpha = 0.2f), Color.Transparent))
-            ) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Box(
-                        modifier = Modifier
-                            .background(CosmicCyan, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(step.first, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(step.second, fontSize = 11.sp, color = Color.White)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Text(
-            "Realtime Web Dashboard Developer Manual:",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
-        Text(
-            "A future dashboard must use a server-side or authenticated Supabase client and must enforce the same ownership and administrator policies as the Android app.",
-            fontSize = 11.sp,
-            color = SecondaryTextLavender
-        )
     }
 }

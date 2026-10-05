@@ -86,6 +86,15 @@ create table if not exists public.device_status_telemetry (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.couple_invites (
+  code text primary key,
+  "creatorEmail" text not null,
+  "creatorName" text not null,
+  "creatorEmoji" text not null,
+  "isActive" boolean not null default true,
+  "createdAt" bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
 create table if not exists public.couple_location_updates (
   "ownerId" text primary key,
   latitude double precision not null,
