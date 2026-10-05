@@ -16,6 +16,7 @@ import com.example.data.model.LearningTask
 import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
 import com.example.data.model.CalendarTask
+import com.example.data.model.PartnerLocationRecord
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -140,6 +141,16 @@ interface AppDao {
 
     @Query("DELETE FROM calendar_tasks")
     suspend fun clearCalendarTasks()
+
+    // --- Partner location (duo GPS module) ---
+    @Query("SELECT * FROM partner_locations ORDER BY ownerId ASC")
+    fun getAllPartnerLocationsFlow(): Flow<List<PartnerLocationRecord>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPartnerLocation(record: PartnerLocationRecord)
+
+    @Query("DELETE FROM partner_locations")
+    suspend fun clearPartnerLocations()
 }
 
 @Database(
@@ -150,9 +161,10 @@ interface AppDao {
         LearningTask::class,
         ExpenseEntry::class,
         SavingTask::class,
-        CalendarTask::class
+        CalendarTask::class,
+        PartnerLocationRecord::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

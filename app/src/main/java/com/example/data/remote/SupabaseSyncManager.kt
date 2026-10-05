@@ -594,6 +594,48 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         */
     }
 
+    suspend fun pushPartnerLocation(record: com.example.data.model.PartnerLocationRecord): Boolean =
+        withContext(Dispatchers.IO) {
+            val url = getSupabaseUrl()
+            val key = getSupabaseAnonKey()
+            if (url.isBlank() || key.isBlank()) return@withContext false
+            try {
+                val adapter = moshi.adapter<List<com.example.data.model.PartnerLocationRecord>>(
+                    Types.newParameterizedType(
+                        List::class.java,
+                        com.example.data.model.PartnerLocationRecord::class.java
+                    )
+                )
+                val json = adapter.toJson(listOf(record))
+                postTableData("couple_location_updates", json, url, key)
+                true
+            } catch (e: Exception) {
+                Log.e("SupabaseSync", "Failed to push partner location", e)
+                false
+            }
+        }
+
+    suspend fun fetchPartnerLocationsFromBackend(): List<com.example.data.model.PartnerLocationRecord> =
+        withContext(Dispatchers.IO) {
+            val url = getSupabaseUrl()
+            val key = getSupabaseAnonKey()
+            if (url.isBlank() || key.isBlank()) return@withContext emptyList()
+            try {
+                val json = getTableData("couple_location_updates", url, key)
+                if (json.isBlank() || json == "[]") return@withContext emptyList()
+                val adapter = moshi.adapter<List<com.example.data.model.PartnerLocationRecord>>(
+                    Types.newParameterizedType(
+                        List::class.java,
+                        com.example.data.model.PartnerLocationRecord::class.java
+                    )
+                )
+                adapter.fromJson(json) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e("SupabaseSync", "Failed to fetch partner locations", e)
+                emptyList()
+            }
+        }
+
     fun resetState() {
         _syncState.value = SupabaseSyncState.Idle
     }

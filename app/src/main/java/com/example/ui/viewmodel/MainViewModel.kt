@@ -11,7 +11,12 @@ import com.example.data.model.LearningTask
 import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
 import com.example.data.model.CalendarTask
+import com.example.data.model.PartnerLocationRecord
 import com.example.data.repository.AppRepository
+import com.example.location.CoupleLocationManager
+import android.location.Location
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import com.example.data.remote.SupabaseSyncManager
 import com.example.data.remote.SupabaseSyncState
 import com.example.network.GeminiService
@@ -72,9 +77,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val allSavingTasksFlow: StateFlow<List<SavingTask>>
     val allLearningTasksFlow: StateFlow<List<LearningTask>>
     val allCalendarTasksFlow: StateFlow<List<CalendarTask>>
+    val partnerLocationsFlow: StateFlow<List<PartnerLocationRecord>>
+
+    private val coupleLocationManager: CoupleLocationManager
+    private var liveLocationJob: Job? = null
+
+    private val _locationSharingEnabled = MutableStateFlow(
+        sharedPrefs.getBoolean("location_sharing_enabled", false)
+    )
+    val locationSharingEnabled: StateFlow<Boolean> = _locationSharingEnabled.asStateFlow()
+
+    private val _locationStatusMessage = MutableStateFlow("")
+    val locationStatusMessage: StateFlow<String> = _locationStatusMessage.asStateFlow()
 
     // --- UI Controls ---
-    private val _selectedTab = MutableStateFlow(0) // 0: Dashboard, 1: Learning & Calendar, 2: Monthly Expenses, 3: Saving Advisor, 4: Profiles
+    private val _selectedTab = MutableStateFlow(0) // 0: Home, 1: Learn, 2: Ledger, 3: Locate, 4: AI, 5: Settings
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
     private val _selectedDate = MutableStateFlow("")
@@ -98,6 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val appDao = AppDatabase.getDatabase(application).appDao()
         repository = AppRepository(appDao)
         supabaseSyncManager = SupabaseSyncManager(application, appDao)
+        coupleLocationManager = CoupleLocationManager(application)
 
         // Initialize today's date
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -140,12 +158,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+        partnerLocationsFlow = repository.partnerLocationsFlow.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
         // Seed data on cold start if database is empty
         viewModelScope.launch {
             seedDefaultAccounts()
             supabaseSyncManager.forcePullFromSupabase()
             seedInitialDatabaseIfEmpty()
             startTelemetryLoop()
+            startPartnerLocationSyncLoop()
+            if (_locationSharingEnabled.value) {
+                startLiveLocationUpdates()
+            }
             // Keep the loading screen active for 2 seconds to showcase the modern logo and background transition
             kotlinx.coroutines.delay(2000)
             _isAppLoading.value = false
@@ -479,6 +507,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 appDao.clearExpenseEntries()
                 appDao.clearSavingTasks()
                 appDao.clearCalendarTasks()
+                appDao.clearPartnerLocations()
 
                 // Seed defaults again
                 appDao.insertProfile(UserProfile("user", "Minnyo", "🦁", dailyBudget = 80.0, monthlySavingGoal = 600.0))
@@ -990,5 +1019,102 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _adminDeviceTelemetries.value = list
             }
         }
+    }
+
+    // --- Duo location tracker module ---
+    fun setLocationSharingEnabled(enabled: Boolean) {
+        if (_locationSharingEnabled.value == enabled) return
+        _locationSharingEnabled.value = enabled
+        sharedPrefs.edit().putBoolean("location_sharing_enabled", enabled).apply()
+        if (enabled) {
+            startLiveLocationUpdates()
+        } else {
+            liveLocationJob?.cancel()
+            liveLocationJob = null
+            viewModelScope.launch { publishSharingPaused() }
+        }
+    }
+
+    fun refreshPartnerLocationsNow() {
+        viewModelScope.launch { syncPartnerLocationsFromCloud() }
+    }
+
+    fun onLocationPermissionResult(granted: Boolean) {
+        if (granted) {
+            setLocationSharingEnabled(true)
+            _locationStatusMessage.value = "Location permission granted."
+        } else {
+            setLocationSharingEnabled(false)
+            _locationStatusMessage.value = "Location permission is required to share your position."
+        }
+    }
+
+    private fun startLiveLocationUpdates() {
+        liveLocationJob?.cancel()
+        liveLocationJob = viewModelScope.launch {
+            _locationStatusMessage.value = "Listening for GPS updates…"
+            try {
+                coupleLocationManager.locationUpdates().collect { location ->
+                    if (_locationSharingEnabled.value && isLoggedIn.value && isCoupled.value) {
+                        publishLocation(location)
+                    }
+                }
+            } catch (e: SecurityException) {
+                _locationStatusMessage.value = "Enable location permission in system settings."
+            }
+        }
+    }
+
+    private fun startPartnerLocationSyncLoop() {
+        viewModelScope.launch {
+            while (isActive) {
+                if (isLoggedIn.value && isCoupled.value && supabaseSyncManager.isConfigured()) {
+                    syncPartnerLocationsFromCloud()
+                }
+                kotlinx.coroutines.delay(25_000)
+            }
+        }
+    }
+
+    private suspend fun syncPartnerLocationsFromCloud() {
+        val remote = supabaseSyncManager.fetchPartnerLocationsFromBackend()
+        remote.forEach { repository.insertPartnerLocation(it) }
+    }
+
+    private suspend fun publishLocation(location: Location) {
+        val record = PartnerLocationRecord(
+            ownerId = _activeUserContext.value,
+            latitude = location.latitude,
+            longitude = location.longitude,
+            accuracyMeters = location.accuracy,
+            isSharingEnabled = true,
+            updatedAt = System.currentTimeMillis()
+        )
+        repository.insertPartnerLocation(record)
+        if (supabaseSyncManager.isConfigured()) {
+            val ok = supabaseSyncManager.pushPartnerLocation(record)
+            _locationStatusMessage.value = if (ok) {
+                "Location shared · ${String.format("%.5f", location.latitude)}, ${String.format("%.5f", location.longitude)}"
+            } else {
+                "Saved locally; cloud sync failed (check Supabase table & RLS)."
+            }
+        }
+    }
+
+    private suspend fun publishSharingPaused() {
+        val existing = partnerLocationsFlow.value.find { it.ownerId == _activeUserContext.value }
+        val record = PartnerLocationRecord(
+            ownerId = _activeUserContext.value,
+            latitude = existing?.latitude ?: 0.0,
+            longitude = existing?.longitude ?: 0.0,
+            accuracyMeters = existing?.accuracyMeters ?: 0f,
+            isSharingEnabled = false,
+            updatedAt = System.currentTimeMillis()
+        )
+        repository.insertPartnerLocation(record)
+        if (supabaseSyncManager.isConfigured()) {
+            supabaseSyncManager.pushPartnerLocation(record)
+        }
+        _locationStatusMessage.value = "Location sharing paused."
     }
 }

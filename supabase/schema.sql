@@ -86,6 +86,15 @@ create table if not exists public.device_status_telemetry (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.couple_location_updates (
+  "ownerId" text primary key,
+  latitude double precision not null,
+  longitude double precision not null,
+  "accuracyMeters" double precision not null default 0,
+  "isSharingEnabled" boolean not null default false,
+  "updatedAt" bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
 create index if not exists learning_roadmaps_owner_idx on public.learning_roadmaps ("ownerId");
 create index if not exists learning_tasks_owner_date_idx on public.learning_tasks ("ownerId", "dateString");
 create index if not exists expense_entries_owner_date_idx on public.expense_entries ("ownerId", "dateString");
