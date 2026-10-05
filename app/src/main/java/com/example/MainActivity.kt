@@ -339,8 +339,9 @@ fun AppNavigationContent(viewModel: MainViewModel) {
                             0 -> DashboardScreen(viewModel)
                             1 -> LearningScreen(viewModel)
                             2 -> ExpensesScreen(viewModel)
-                            3 -> SavingsAdvisorScreen(viewModel)
-                            4 -> ProfilesScreen(viewModel)
+                            3 -> com.example.location.LocationTrackerScreen(viewModel)
+                            4 -> SavingsAdvisorScreen(viewModel)
+                            5 -> ProfilesScreen(viewModel)
                         }
                     }
                 }
@@ -3822,8 +3823,9 @@ fun CoupleNavigationBar(viewModel: MainViewModel) {
                 Triple("Home", Icons.Filled.Home, 0),
                 Triple("Learn", Icons.Filled.MenuBook, 1),
                 Triple("Ledger", Icons.Filled.AttachMoney, 2),
-                Triple("AI coach", Icons.Filled.AutoAwesome, 3),
-                Triple("Settings", Icons.Filled.Settings, 4)
+                Triple("Locate", Icons.Filled.LocationOn, 3),
+                Triple("AI", Icons.Filled.AutoAwesome, 4),
+                Triple("Setup", Icons.Filled.Settings, 5)
             )
 
             navItems.forEach { (title, icon, index) ->
@@ -3845,7 +3847,7 @@ fun CoupleNavigationBar(viewModel: MainViewModel) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = title,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (isSelected) Color.White else SecondaryTextLavender
                     )

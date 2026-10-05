@@ -76,3 +76,13 @@ data class CalendarTask(
     val isCompleted: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "partner_locations")
+data class PartnerLocationRecord(
+    @PrimaryKey val ownerId: String, // "user" or "girlfriend"
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float = 0f,
+    val isSharingEnabled: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis()
+)

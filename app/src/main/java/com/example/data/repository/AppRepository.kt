@@ -8,6 +8,7 @@ import com.example.data.model.LearningTask
 import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
 import com.example.data.model.CalendarTask
+import com.example.data.model.PartnerLocationRecord
 import kotlinx.coroutines.flow.Flow
 
 class AppRepository(private val appDao: AppDao) {
@@ -84,4 +85,10 @@ class AppRepository(private val appDao: AppDao) {
     suspend fun updateCalendarTask(task: CalendarTask) = appDao.updateCalendarTask(task)
 
     suspend fun deleteCalendarTaskById(id: String) = appDao.deleteCalendarTaskById(id)
+
+    val partnerLocationsFlow: Flow<List<PartnerLocationRecord>> = appDao.getAllPartnerLocationsFlow()
+
+    suspend fun insertPartnerLocation(record: PartnerLocationRecord) = appDao.insertPartnerLocation(record)
+
+    suspend fun clearPartnerLocations() = appDao.clearPartnerLocations()
 }
