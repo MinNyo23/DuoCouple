@@ -380,8 +380,8 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
     }
 
     // Helper GET tables
-    private fun getTableData(tableName: String, url: String, key: String): String {
-        val request = buildBaseRequest(tableName, "GET", url, key, "select=*")
+    private fun getTableData(tableName: String, url: String, key: String, queryParams: String = "select=*"): String {
+        val request = buildBaseRequest(tableName, "GET", url, key, queryParams)
             .get()
             .build()
         client.newCall(request).execute().use { response ->
@@ -592,6 +592,79 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             return@withContext null
         }
         */
+    }
+
+    suspend fun publishCoupleInvite(record: com.example.data.model.CoupleInviteRecord): Boolean =
+        withContext(Dispatchers.IO) {
+            val url = getSupabaseUrl()
+            val key = getSupabaseAnonKey()
+            if (url.isBlank() || key.isBlank()) return@withContext false
+            try {
+                val adapter = moshi.adapter<List<com.example.data.model.CoupleInviteRecord>>(
+                    Types.newParameterizedType(
+                        List::class.java,
+                        com.example.data.model.CoupleInviteRecord::class.java
+                    )
+                )
+                postTableData("couple_invites", adapter.toJson(listOf(record)), url, key)
+                true
+            } catch (e: Exception) {
+                Log.e("SupabaseSync", "Failed to publish couple invite", e)
+                false
+            }
+        }
+
+    suspend fun fetchCoupleInvite(code: String): com.example.data.model.CoupleInviteRecord? =
+        withContext(Dispatchers.IO) {
+            val url = getSupabaseUrl()
+            val key = getSupabaseAnonKey()
+            if (url.isBlank() || key.isBlank()) return@withContext null
+            val normalized = code.trim().uppercase()
+            try {
+                val json = getTableData(
+                    "couple_invites",
+                    url,
+                    key,
+                    "select=*&code=eq.$normalized&limit=1"
+                )
+                if (json.isBlank() || json == "[]") return@withContext null
+                val adapter = moshi.adapter<List<com.example.data.model.CoupleInviteRecord>>(
+                    Types.newParameterizedType(
+                        List::class.java,
+                        com.example.data.model.CoupleInviteRecord::class.java
+                    )
+                )
+                adapter.fromJson(json)?.firstOrNull()?.takeIf { it.isActive }
+            } catch (e: Exception) {
+                Log.e("SupabaseSync", "Failed to fetch couple invite", e)
+                null
+            }
+        }
+
+    suspend fun requestPasswordReset(email: String): String? = withContext(Dispatchers.IO) {
+        val url = getSupabaseUrl()
+        val key = getSupabaseAnonKey()
+        if (url.isBlank() || key.isBlank()) return@withContext "Cloud sign-in is not configured in this build"
+        try {
+            val payload = mapOf("email" to email.trim().lowercase())
+            val adapter = moshi.adapter<Map<String, String>>(
+                Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+            )
+            val endpoint = if (url.endsWith("/")) "${url}auth/v1/recover" else "$url/auth/v1/recover"
+            val request = Request.Builder()
+                .url(endpoint)
+                .header("apikey", key)
+                .header("Content-Type", "application/json")
+                .post(adapter.toJson(payload).toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                return@withContext if (response.isSuccessful) null
+                else "Could not send reset email. Check the address and try again."
+            }
+        } catch (e: Exception) {
+            Log.e("SupabaseSync", "Password reset request failed", e)
+            return@withContext "Unable to reach Supabase. Check your connection."
+        }
     }
 
     suspend fun pushPartnerLocation(record: com.example.data.model.PartnerLocationRecord): Boolean =

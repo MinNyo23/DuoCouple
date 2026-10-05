@@ -17,6 +17,8 @@ If the old repository version was ever built or distributed, rotate the exposed 
 3. Configure authentication and Row Level Security policies before production use. The current Android code does not yet establish a Supabase Auth session, so do not enable broad anonymous read/write policies for real user data.
 4. Copy `.env.example` to `.env` locally and set `SUPABASE_URL` plus the publishable/anon key. `.env` is ignored by Git. These values are baked into the APK at build time; **end users do not enter Supabase credentials in the app**.
 5. Rebuild the APK after changing `.env` so the new key is included.
+6. For **couple pairing**, run the `couple_invites` table from [`supabase/schema.sql`](supabase/schema.sql) so generated codes sync to Supabase (partner joins with **Enter Code** on their device).
+7. For the **Locate** tab (GPS module), run the `couple_location_updates` table from the same schema and allow your couple to read/write that table (RLS policies).
 
 ## Build locally
 
