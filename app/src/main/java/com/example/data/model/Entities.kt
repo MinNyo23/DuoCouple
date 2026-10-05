@@ -11,7 +11,10 @@ data class UserProfile(
     val imageUri: String? = null,
     val remoteImagePath: String? = null,
     val dailyBudget: Double = 50.0,
-    val monthlySavingGoal: Double = 500.0
+    val monthlySavingGoal: Double = 500.0,
+    val coupleId: String? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "learning_roadmaps")
@@ -20,7 +23,10 @@ data class LearningRoadmap(
     val ownerId: String, // "user" or "girlfriend"
     val title: String,
     val description: String,
-    val createdTimestamp: Long = System.currentTimeMillis()
+    val createdTimestamp: Long = System.currentTimeMillis(),
+    val coupleId: String? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "roadmap_lessons")
@@ -31,7 +37,10 @@ data class RoadmapLesson(
     val description: String,
     val difficulty: String, // "Beginner", "Intermediate", "Advanced"
     val isCompleted: Boolean = false,
-    val orderIndex: Int
+    val orderIndex: Int,
+    val coupleId: String? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "learning_tasks")
@@ -42,7 +51,10 @@ data class LearningTask(
     val dateString: String, // "YYYY-MM-DD" e.g., "2026-05-21"
     val isCompleted: Boolean = false,
     val minutesSpent: Int = 0,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val coupleId: String? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "expense_entries")
@@ -54,7 +66,10 @@ data class ExpenseEntry(
     val category: String, // "Food", "Transport", "Shopping", "Entertainment", "Utilities", "Income", "Salary", "Other"
     val dateString: String, // "YYYY-MM-DD"
     val note: String = "",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val coupleId: String? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "saving_tasks")
@@ -65,7 +80,10 @@ data class SavingTask(
     val rewardAmount: Double, // Est. money saved
     val dateString: String, // "YYYY-MM-DD"
     val isCompleted: Boolean = false,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val coupleId: String? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "calendar_tasks")
@@ -74,15 +92,19 @@ data class CalendarTask(
     val title: String,
     val time: String,
     val isCompleted: Boolean = false,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val coupleId: String? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "partner_locations")
 data class PartnerLocationRecord(
-    @PrimaryKey val ownerId: String, // "user" or "girlfriend"
+    @PrimaryKey val ownerId: String, // auth user id on cloud; "user" / "girlfriend" locally
     val latitude: Double,
     val longitude: Double,
     val accuracyMeters: Float = 0f,
     val isSharingEnabled: Boolean = false,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val coupleId: String? = null
 )

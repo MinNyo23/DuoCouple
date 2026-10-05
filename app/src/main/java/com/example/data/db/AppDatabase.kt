@@ -22,7 +22,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface AppDao {
     // --- User Profiles ---
-    @Query("SELECT * FROM user_profiles")
+    @Query("SELECT * FROM user_profiles WHERE deletedAt IS NULL")
     fun getAllProfilesFlow(): Flow<List<UserProfile>>
 
     @Query("SELECT * FROM user_profiles WHERE id = :id")
@@ -32,10 +32,10 @@ interface AppDao {
     suspend fun insertProfile(profile: UserProfile)
 
     // --- Learning Roadmaps ---
-    @Query("SELECT * FROM learning_roadmaps ORDER BY createdTimestamp DESC")
+    @Query("SELECT * FROM learning_roadmaps WHERE deletedAt IS NULL ORDER BY createdTimestamp DESC")
     fun getAllRoadmapsFlow(): Flow<List<LearningRoadmap>>
 
-    @Query("SELECT * FROM learning_roadmaps WHERE ownerId = :ownerId ORDER BY createdTimestamp DESC")
+    @Query("SELECT * FROM learning_roadmaps WHERE ownerId = :ownerId AND deletedAt IS NULL ORDER BY createdTimestamp DESC")
     fun getRoadmapsByOwnerFlow(ownerId: String): Flow<List<LearningRoadmap>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -44,11 +44,14 @@ interface AppDao {
     @Query("DELETE FROM learning_roadmaps WHERE id = :id")
     suspend fun deleteRoadmapById(id: Int)
 
+    @Query("UPDATE learning_roadmaps SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun tombstoneRoadmap(id: Int, deletedAt: Long, updatedAt: Long)
+
     // --- Roadmap Lessons ---
-    @Query("SELECT * FROM roadmap_lessons WHERE roadmapId = :roadmapId ORDER BY orderIndex ASC")
+    @Query("SELECT * FROM roadmap_lessons WHERE roadmapId = :roadmapId AND deletedAt IS NULL ORDER BY orderIndex ASC")
     fun getLessonsForRoadmapFlow(roadmapId: Int): Flow<List<RoadmapLesson>>
 
-    @Query("SELECT * FROM roadmap_lessons WHERE roadmapId = :roadmapId ORDER BY orderIndex ASC")
+    @Query("SELECT * FROM roadmap_lessons WHERE roadmapId = :roadmapId AND deletedAt IS NULL ORDER BY orderIndex ASC")
     suspend fun getLessonsForRoadmap(roadmapId: Int): List<RoadmapLesson>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -61,7 +64,7 @@ interface AppDao {
     suspend fun deleteLessonById(id: Int)
 
     // --- Learning Tasks ---
-    @Query("SELECT * FROM learning_tasks ORDER BY timestamp DESC")
+    @Query("SELECT * FROM learning_tasks WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     fun getAllLearningTasksFlow(): Flow<List<LearningTask>>
 
     @Query("SELECT * FROM learning_tasks WHERE ownerId = :ownerId ORDER BY timestamp DESC")
@@ -79,15 +82,39 @@ interface AppDao {
     @Query("DELETE FROM learning_tasks WHERE id = :id")
     suspend fun deleteLearningTaskById(id: Int)
 
+    @Query("UPDATE learning_tasks SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun tombstoneLearningTask(id: Int, deletedAt: Long, updatedAt: Long)
+
     // --- Expense Entries ---
-    @Query("SELECT * FROM expense_entries ORDER BY timestamp DESC")
+    @Query("SELECT * FROM expense_entries WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     fun getAllExpensesFlow(): Flow<List<ExpenseEntry>>
 
     @Query("SELECT * FROM expense_entries WHERE ownerId = :ownerId ORDER BY timestamp DESC")
     fun getExpensesByOwnerFlow(ownerId: String): Flow<List<ExpenseEntry>>
 
-    @Query("SELECT * FROM expense_entries ORDER BY timestamp DESC")
+    @Query("SELECT * FROM expense_entries WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     suspend fun getAllExpensesList(): List<ExpenseEntry>
+
+    @Query("SELECT * FROM user_profiles WHERE coupleId = :coupleId AND updatedAt >= :since")
+    suspend fun getProfilesForSync(coupleId: String, since: Long): List<UserProfile>
+
+    @Query("SELECT * FROM learning_roadmaps WHERE coupleId = :coupleId AND updatedAt >= :since")
+    suspend fun getRoadmapsForSync(coupleId: String, since: Long): List<LearningRoadmap>
+
+    @Query("SELECT * FROM roadmap_lessons WHERE coupleId = :coupleId AND updatedAt >= :since")
+    suspend fun getLessonsForSync(coupleId: String, since: Long): List<RoadmapLesson>
+
+    @Query("SELECT * FROM learning_tasks WHERE coupleId = :coupleId AND updatedAt >= :since")
+    suspend fun getLearningTasksForSync(coupleId: String, since: Long): List<LearningTask>
+
+    @Query("SELECT * FROM expense_entries WHERE coupleId = :coupleId AND updatedAt >= :since")
+    suspend fun getExpensesForSync(coupleId: String, since: Long): List<ExpenseEntry>
+
+    @Query("SELECT * FROM saving_tasks WHERE coupleId = :coupleId AND updatedAt >= :since")
+    suspend fun getSavingTasksForSync(coupleId: String, since: Long): List<SavingTask>
+
+    @Query("SELECT * FROM calendar_tasks WHERE coupleId = :coupleId AND updatedAt >= :since")
+    suspend fun getCalendarTasksForSync(coupleId: String, since: Long): List<CalendarTask>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExpense(expense: ExpenseEntry)
@@ -95,8 +122,11 @@ interface AppDao {
     @Query("DELETE FROM expense_entries WHERE id = :id")
     suspend fun deleteExpenseById(id: Int)
 
+    @Query("UPDATE expense_entries SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun tombstoneExpense(id: Int, deletedAt: Long, updatedAt: Long)
+
     // --- Saving Tasks ---
-    @Query("SELECT * FROM saving_tasks ORDER BY timestamp DESC")
+    @Query("SELECT * FROM saving_tasks WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     fun getAllSavingTasksFlow(): Flow<List<SavingTask>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -108,8 +138,11 @@ interface AppDao {
     @Query("DELETE FROM saving_tasks WHERE id = :id")
     suspend fun deleteSavingTaskById(id: Int)
 
+    @Query("UPDATE saving_tasks SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun tombstoneSavingTask(id: Int, deletedAt: Long, updatedAt: Long)
+
     // --- Calendar Tasks ---
-    @Query("SELECT * FROM calendar_tasks ORDER BY timestamp DESC")
+    @Query("SELECT * FROM calendar_tasks WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     fun getAllCalendarTasksFlow(): Flow<List<CalendarTask>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -120,6 +153,9 @@ interface AppDao {
 
     @Query("DELETE FROM calendar_tasks WHERE id = :id")
     suspend fun deleteCalendarTaskById(id: String)
+
+    @Query("UPDATE calendar_tasks SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun tombstoneCalendarTask(id: String, deletedAt: Long, updatedAt: Long)
 
     @Query("DELETE FROM user_profiles")
     suspend fun clearUserProfiles()
@@ -164,7 +200,7 @@ interface AppDao {
         CalendarTask::class,
         PartnerLocationRecord::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
