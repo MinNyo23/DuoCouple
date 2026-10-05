@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">UsSpace</string>
+    <string name="location_sharing_channel_name">Partner location sharing</string>
+    <string name="location_sharing_channel_description">Shown while UsSpace shares your GPS with your partner in the background.</string>
+    <string name="location_sharing_notification_title">Sharing location with partner</string>
+    <string name="location_sharing_notification_text">UsSpace is updating your live position for your duo space.</string>
 </resources>

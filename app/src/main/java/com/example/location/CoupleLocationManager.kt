@@ -36,13 +36,28 @@ class CoupleLocationManager(context: Context) {
             .setMinUpdateIntervalMillis(intervalMs / 2)
             .setMaxUpdates(120)
             .build()
-        val callback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { trySend(it) }
-            }
-        }
+        val callback = locationCallback { trySend(it) }
         fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
         awaitClose { fusedClient.removeLocationUpdates(callback) }
+    }
+
+    /** Continuous updates for foreground-service background sharing (no update cap). */
+    @SuppressLint("MissingPermission")
+    fun backgroundLocationUpdates(intervalMs: Long = 30_000L): Flow<Location> = callbackFlow {
+        val request = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, intervalMs)
+            .setMinUpdateIntervalMillis(15_000L)
+            .setMinUpdateDistanceMeters(25f)
+            .setWaitForAccurateLocation(false)
+            .build()
+        val callback = locationCallback { trySend(it) }
+        fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+        awaitClose { fusedClient.removeLocationUpdates(callback) }
+    }
+
+    private fun locationCallback(onLocation: (Location) -> Unit) = object : LocationCallback() {
+        override fun onLocationResult(result: LocationResult) {
+            result.lastLocation?.let(onLocation)
+        }
     }
 
     fun stopAllUpdates() {

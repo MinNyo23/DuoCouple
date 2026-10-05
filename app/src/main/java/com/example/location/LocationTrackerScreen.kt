@@ -3,7 +3,7 @@ package com.example.location
 import android.content.Intent
 import android.net.Uri
 import android.Manifest
-import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -29,7 +29,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.GlassCard
 import com.example.Text
@@ -52,21 +51,71 @@ fun LocationTrackerScreen(viewModel: MainViewModel) {
     val partnerId = if (activeContext == "user") "girlfriend" else "user"
     val partnerProfile = profiles.find { it.id == partnerId }
 
-    val myLocation = locations.find { it.ownerId == activeContext }
+    val myLocation = locations.find { it.ownerId == PartnerLocationPublisher.LOCAL_OWNER_ID }
     val partnerLocation = locations.find { it.ownerId == partnerId }
 
     val context = LocalContext.current
-    val hasFineLocation = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.ACCESS_FINE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
 
-    val permissionLauncher = rememberLauncherForActivityResult(
+    fun hasAllSharingPermissions(): Boolean =
+        LocationPermissionHelper.hasFineOrCoarseLocation(context) &&
+            LocationPermissionHelper.hasPostNotifications(context) &&
+            LocationPermissionHelper.hasBackgroundLocation(context)
+
+    val backgroundPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.setLocationSharingEnabled(true)
+            viewModel.onLocationPermissionResult(true)
+        } else {
+            viewModel.onLocationPermissionResult(false)
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            advanceLocationPermissionFlow()
+        } else {
+            viewModel.onLocationPermissionResult(false)
+        }
+    }
+
+    val finePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         val granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        viewModel.onLocationPermissionResult(granted)
+        if (granted) {
+            advanceLocationPermissionFlow()
+        } else {
+            viewModel.onLocationPermissionResult(false)
+        }
+    }
+
+    fun advanceLocationPermissionFlow() {
+        when {
+            !LocationPermissionHelper.hasFineOrCoarseLocation(context) -> {
+                finePermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !LocationPermissionHelper.hasPostNotifications(context) -> {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                !LocationPermissionHelper.hasBackgroundLocation(context) -> {
+                backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+            else -> {
+                viewModel.setLocationSharingEnabled(true)
+            }
+        }
     }
 
     LazyColumn(
@@ -120,7 +169,7 @@ fun LocationTrackerScreen(viewModel: MainViewModel) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Share my location", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(
-                            "Updates every ~15s while this is on and the app can access GPS.",
+                            "Uses a foreground notification to share GPS every ~30s, including while the app is in the background.",
                             fontSize = 11.sp,
                             color = SecondaryTextLavender
                         )
@@ -129,15 +178,10 @@ fun LocationTrackerScreen(viewModel: MainViewModel) {
                         checked = sharingEnabled,
                         onCheckedChange = { enabled ->
                             if (enabled) {
-                                if (hasFineLocation) {
+                                if (hasAllSharingPermissions()) {
                                     viewModel.setLocationSharingEnabled(true)
                                 } else {
-                                    permissionLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.ACCESS_FINE_LOCATION,
-                                            Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
-                                    )
+                                    advanceLocationPermissionFlow()
                                 }
                             } else {
                                 viewModel.setLocationSharingEnabled(false)
@@ -153,10 +197,20 @@ fun LocationTrackerScreen(viewModel: MainViewModel) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(statusMessage, fontSize = 11.sp, color = SecondaryTextLavender)
                 }
-                if (!hasFineLocation) {
+                if (!LocationPermissionHelper.hasFineOrCoarseLocation(context)) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        "Grant location permission to enable sharing.",
+                        "Grant location access to enable sharing.",
+                        fontSize = 11.sp,
+                        color = SweetheartedPeach,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                    !LocationPermissionHelper.hasBackgroundLocation(context)
+                ) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        "Allow “All the time” location for reliable updates when the app is closed.",
                         fontSize = 11.sp,
                         color = SweetheartedPeach,
                         fontWeight = FontWeight.SemiBold
@@ -222,7 +276,7 @@ fun LocationTrackerScreen(viewModel: MainViewModel) {
 
         item {
             Text(
-                text = "Privacy: only your couple workspace receives coordinates. Turn sharing off anytime. Apply RLS on couple_location_updates in Supabase for production.",
+                text = "Privacy: only your couple workspace receives coordinates. A persistent notification appears while background sharing is on. Turn sharing off anytime.",
                 fontSize = 10.sp,
                 color = SecondaryTextLavender,
                 textAlign = TextAlign.Center,
@@ -232,6 +286,7 @@ fun LocationTrackerScreen(viewModel: MainViewModel) {
     }
 }
 
+@Composable
 @Composable
 private fun LocationPersonCard(
     title: String,
