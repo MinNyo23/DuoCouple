@@ -12,6 +12,7 @@ import com.example.data.model.ExpenseEntry
 import com.example.data.model.SavingTask
 import com.example.data.model.CalendarTask
 import com.example.data.model.PartnerLocationRecord
+import com.example.data.model.CouplePairRecord
 import com.example.data.repository.AppRepository
 import com.example.location.CoupleLocationManager
 import android.location.Location
@@ -110,6 +111,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _customGeminiApiKey = MutableStateFlow(sharedPrefs.getString("custom_gemini_api_key", "") ?: "")
     val customGeminiApiKey: StateFlow<String> = _customGeminiApiKey.asStateFlow()
 
+    private val _activeCouplePair = MutableStateFlow<CouplePairRecord?>(null)
+    val activeCouplePair: StateFlow<CouplePairRecord?> = _activeCouplePair.asStateFlow()
+
     // --- Active User Selected (For adding individual items on the UI) ---
     private val _activeUserContext = MutableStateFlow("user") // "user" or "girlfriend"
     val activeUserContext: StateFlow<String> = _activeUserContext.asStateFlow()
@@ -170,7 +174,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Seed data on cold start if database is empty
         viewModelScope.launch {
             seedDefaultAccounts()
-            supabaseSyncManager.forcePullFromSupabase()
+            if (supabaseSyncManager.hasAuthSession()) {
+                refreshCouplePairStatus()
+                if (supabaseSyncManager.getActiveCoupleId().isNotBlank()) {
+                    supabaseSyncManager.syncCoupleDataIncremental(pullOnly = true)
+                }
+            }
             seedInitialDatabaseIfEmpty()
             startPartnerLocationSyncLoop()
             if (_locationSharingEnabled.value) {
@@ -224,8 +233,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun triggerSupabasePush() {
         viewModelScope.launch {
-            supabaseSyncManager.forcePushToSupabase()
+            if (supabaseSyncManager.getActiveCoupleId().isBlank()) return@launch
+            supabaseSyncManager.syncCoupleDataIncremental(pushOnly = true)
         }
+    }
+
+    private fun activeCoupleIdOrNull(): String? =
+        supabaseSyncManager.getActiveCoupleId().takeIf { it.isNotBlank() }
+
+    private fun syncTouch(): Long = System.currentTimeMillis()
+
+    suspend fun refreshCouplePairStatus() {
+        val pair = supabaseSyncManager.fetchMyCouplePair()
+        _activeCouplePair.value = pair
+        if (pair?.status == "active") {
+            applyActiveCouplePair(pair)
+        }
+    }
+
+    fun isJoinerAwaitingAccept(): Boolean {
+        val pair = _activeCouplePair.value ?: return false
+        val uid = supabaseSyncManager.authUserId()
+        return pair.status == "pending_accept" && pair.isJoiner(uid)
+    }
+
+    private suspend fun applyActiveCouplePair(pair: CouplePairRecord) {
+        val uid = supabaseSyncManager.authUserId()
+        val partnerName = if (pair.isCreator(uid)) {
+            pair.joinerName ?: "Partner"
+        } else {
+            pair.creatorName
+        }
+        val partnerEmoji = if (pair.isCreator(uid)) {
+            pair.joinerEmoji ?: "🌸"
+        } else {
+            pair.creatorEmoji
+        }
+        supabaseSyncManager.saveActiveCoupleId(pair.id)
+        supabaseSyncManager.stampLocalRowsWithCoupleId(pair.id)
+        if (!_isCoupled.value) {
+            completeCoupling(partnerName, partnerEmoji)
+        }
+        supabaseSyncManager.syncCoupleDataIncremental()
+    }
+
+    suspend fun acceptCouplePartnership(): String? {
+        val pair = _activeCouplePair.value ?: supabaseSyncManager.fetchMyCouplePair()
+            ?: return "No partnership request found."
+        if (pair.status != "pending_accept") return "Nothing to accept right now."
+        if (!pair.isJoiner(supabaseSyncManager.authUserId())) {
+            return "Only the partner who entered the code can accept on this device."
+        }
+        val updated = supabaseSyncManager.acceptCouplePartnership(pair.id)
+            ?: return "Could not accept. Check Supabase RPC & RLS setup."
+        _activeCouplePair.value = updated
+        applyActiveCouplePair(updated)
+        return null
     }
 
     fun triggerSupabasePull() {
@@ -246,7 +309,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val task = CalendarTask(
                 id = java.util.UUID.randomUUID().toString(),
                 title = title,
-                time = time
+                time = time,
+                coupleId = activeCoupleIdOrNull(),
+                updatedAt = syncTouch()
             )
             repository.insertCalendarTask(task)
             triggerSupabasePush()
@@ -257,7 +322,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleCalendarTask(task: CalendarTask) {
         viewModelScope.launch {
-            repository.updateCalendarTask(task.copy(isCompleted = !task.isCompleted))
+            repository.updateCalendarTask(
+                task.copy(isCompleted = !task.isCompleted, updatedAt = syncTouch(), coupleId = activeCoupleIdOrNull() ?: task.coupleId)
+            )
             triggerSupabasePush()
             triggerSupabasePush()
         }
@@ -265,8 +332,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteCalendarTask(task: CalendarTask) {
         viewModelScope.launch {
-            repository.deleteCalendarTaskById(task.id)
-            triggerSupabasePush()
+            if (activeCoupleIdOrNull() != null) {
+                repository.tombstoneCalendarTask(task.id)
+            } else {
+                repository.deleteCalendarTaskById(task.id)
+            }
             triggerSupabasePush()
         }
     }
@@ -285,7 +355,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     imageUri = imageUri,
                     remoteImagePath = remoteImagePath,
                     dailyBudget = dailyBudget,
-                    monthlySavingGoal = monthlySavingGoal
+                    monthlySavingGoal = monthlySavingGoal,
+                    coupleId = activeCoupleIdOrNull(),
+                    updatedAt = syncTouch()
                 )
             )
             if (id == "user") {
@@ -344,9 +416,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             supabaseSyncManager.registerAccountOnBackend(cleanEmail, name.trim(), emoji)
         }
 
-        // Generate couple code automatically right after creating account!
-        generateAndSetCoupleCode()
-
         logIn(name.trim(), emoji)
         triggerBackupOfActiveUser()
         return null
@@ -381,11 +450,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val finalName = sharedPrefs.getString("my_name", "")?.takeIf { it.isNotBlank() } ?: name ?: "Minnyo"
         val finalEmoji = sharedPrefs.getString("my_emoji", "")?.takeIf { it.isNotBlank() } ?: emoji ?: "🦁"
 
-        // Ensure we pre-populate couple code if empty
-        val currentCode = sharedPrefs.getString("couple_code", "") ?: ""
-        if (currentCode.isBlank()) {
-            generateAndSetCoupleCode()
-        }
+        refreshCouplePairStatus()
 
         logIn(finalName, finalEmoji)
         triggerBackupOfActiveUser()
@@ -451,14 +516,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _coupleCode.value = code
             sharedPrefs.edit().putString("couple_code", code).apply()
             if (supabaseSyncManager.isConfigured()) {
-                supabaseSyncManager.publishCoupleInvite(
-                    com.example.data.model.CoupleInviteRecord(
-                        code = code,
-                        creatorEmail = getActiveUserEmail(),
-                        creatorName = _myProfileName.value,
-                        creatorEmoji = _myProfileEmoji.value
-                    )
+                if (!supabaseSyncManager.hasAuthSession()) return@launch
+                val pair = supabaseSyncManager.createCouplePairInvite(
+                    code,
+                    _myProfileName.value,
+                    _myProfileEmoji.value
                 )
+                if (pair != null) {
+                    _activeCouplePair.value = pair
+                }
             }
         }
     }
@@ -469,14 +535,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!supabaseSyncManager.isConfigured()) {
             return "Cloud pairing is unavailable in this build. Check Supabase configuration."
         }
-        val invite = supabaseSyncManager.fetchCoupleInvite(normalized)
-            ?: return "Code not found. Ask your partner to generate a new invite."
-        val myEmail = getActiveUserEmail().trim().lowercase()
-        if (invite.creatorEmail.equals(myEmail, ignoreCase = true)) {
-            return "You cannot join using your own code. Your partner should enter this code on their phone."
+        if (!supabaseSyncManager.hasAuthSession()) {
+            return "Sign in before joining a partner space."
         }
-        completeCoupling(invite.creatorName, invite.creatorEmoji)
-        return null
+        val pair = supabaseSyncManager.requestCoupleJoin(
+            normalized,
+            _myProfileName.value,
+            _myProfileEmoji.value
+        ) ?: return "Code not found or invite expired. Ask your partner to generate a new code."
+        _activeCouplePair.value = pair
+        if (pair.status == "pending_accept" && pair.isJoiner(supabaseSyncManager.authUserId())) {
+            return null
+        }
+        return "Waiting for you to accept the partnership on this device."
     }
 
     suspend fun requestPasswordResetEmail(email: String): String? {
@@ -562,7 +633,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun addRoadmap(ownerId: String, title: String, description: String, lessons: List<Pair<String, String>>) {
         viewModelScope.launch {
             val roadmapId = repository.insertRoadmap(
-                LearningRoadmap(ownerId = ownerId, title = title, description = description)
+                LearningRoadmap(
+                    ownerId = ownerId,
+                    title = title,
+                    description = description,
+                    coupleId = activeCoupleIdOrNull(),
+                    updatedAt = syncTouch()
+                )
             ).toInt()
 
             // Generate standard lessons
@@ -578,7 +655,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             else -> "Advanced"
                         },
                         isCompleted = false,
-                        orderIndex = index
+                        orderIndex = index,
+                        coupleId = activeCoupleIdOrNull(),
+                        updatedAt = syncTouch()
                     )
                 )
             }
@@ -589,7 +668,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteRoadmap(roadmapId: Int) {
         viewModelScope.launch {
-            repository.deleteRoadmapById(roadmapId)
+            if (activeCoupleIdOrNull() != null) {
+                repository.tombstoneRoadmap(roadmapId)
+            } else {
+                repository.deleteRoadmapById(roadmapId)
+            }
             triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
@@ -598,7 +681,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Lessons
     fun toggleLessonCompletion(lesson: RoadmapLesson) {
         viewModelScope.launch {
-            repository.updateLesson(lesson.copy(isCompleted = !lesson.isCompleted))
+            repository.updateLesson(
+                lesson.copy(
+                    isCompleted = !lesson.isCompleted,
+                    updatedAt = syncTouch(),
+                    coupleId = activeCoupleIdOrNull() ?: lesson.coupleId
+                )
+            )
             triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
@@ -621,7 +710,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     description = description,
                     difficulty = difficulty,
                     isCompleted = false,
-                    orderIndex = orderIndex
+                    orderIndex = orderIndex,
+                    coupleId = activeCoupleIdOrNull(),
+                    updatedAt = syncTouch()
                 )
             )
             triggerSupabasePush()
@@ -638,7 +729,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     title = title,
                     dateString = dateString,
                     isCompleted = false,
-                    minutesSpent = minutes
+                    minutesSpent = minutes,
+                    coupleId = activeCoupleIdOrNull(),
+                    updatedAt = syncTouch()
                 )
             )
             triggerSupabasePush()
@@ -648,7 +741,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleLearningTaskCompletion(task: LearningTask) {
         viewModelScope.launch {
-            repository.updateLearningTask(task.copy(isCompleted = !task.isCompleted))
+            repository.updateLearningTask(
+                task.copy(
+                    isCompleted = !task.isCompleted,
+                    updatedAt = syncTouch(),
+                    coupleId = activeCoupleIdOrNull() ?: task.coupleId
+                )
+            )
             triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
@@ -656,7 +755,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteLearningTask(taskId: Int) {
         viewModelScope.launch {
-            repository.deleteLearningTaskById(taskId)
+            if (activeCoupleIdOrNull() != null) {
+                repository.tombstoneLearningTask(taskId)
+            } else {
+                repository.deleteLearningTaskById(taskId)
+            }
             triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
@@ -672,7 +775,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isIncome = isIncome,
                     category = category,
                     dateString = dateString,
-                    note = note
+                    note = note,
+                    coupleId = activeCoupleIdOrNull(),
+                    updatedAt = syncTouch()
                 )
             )
             com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
@@ -683,7 +788,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteExpense(expenseId: Int) {
         viewModelScope.launch {
-            repository.deleteExpenseById(expenseId)
+            if (activeCoupleIdOrNull() != null) {
+                repository.tombstoneExpense(expenseId)
+            } else {
+                repository.deleteExpenseById(expenseId)
+            }
             triggerSupabasePush()
             com.example.widget.DashboardWidgetProvider.triggerUpdate(getApplication())
             triggerBackupOfActiveUser()
@@ -699,7 +808,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     title = title,
                     rewardAmount = reward,
                     dateString = dateString,
-                    isCompleted = false
+                    isCompleted = false,
+                    coupleId = activeCoupleIdOrNull(),
+                    updatedAt = syncTouch()
                 )
             )
             triggerSupabasePush()
@@ -709,7 +820,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleSavingTaskCompletion(task: SavingTask) {
         viewModelScope.launch {
-            repository.updateSavingTask(task.copy(isCompleted = !task.isCompleted))
+            repository.updateSavingTask(
+                task.copy(
+                    isCompleted = !task.isCompleted,
+                    updatedAt = syncTouch(),
+                    coupleId = activeCoupleIdOrNull() ?: task.coupleId
+                )
+            )
             triggerSupabasePush()
             triggerBackupOfActiveUser()
         }
@@ -717,7 +834,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteSavingTask(id: Int) {
         viewModelScope.launch {
-            repository.deleteSavingTaskById(id)
+            if (activeCoupleIdOrNull() != null) {
+                repository.tombstoneSavingTask(id)
+            } else {
+                repository.deleteSavingTaskById(id)
+            }
             triggerSupabasePush()
             triggerBackupOfActiveUser()
         }

@@ -3912,12 +3912,23 @@ fun CoupleConnectScreen(viewModel: MainViewModel) {
     val myName by viewModel.myProfileName.collectAsStateWithLifecycle()
     val myEmoji by viewModel.myProfileEmoji.collectAsStateWithLifecycle()
     val coupleCode by viewModel.coupleCode.collectAsStateWithLifecycle()
+    val couplePair by viewModel.activeCouplePair.collectAsStateWithLifecycle()
+    val awaitingAccept = viewModel.isJoinerAwaitingAccept()
 
     var activeTab by remember { mutableStateOf(0) } // 0: Create, 1: Join
     var inputCode by remember { mutableStateOf("") }
     var joinError by remember { mutableStateOf<String?>(null) }
+    var acceptError by remember { mutableStateOf<String?>(null) }
     var isJoining by remember { mutableStateOf(false) }
+    var isAccepting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            viewModel.refreshCouplePairStatus()
+            kotlinx.coroutines.delay(4000)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -4095,7 +4106,15 @@ fun CoupleConnectScreen(viewModel: MainViewModel) {
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Share the code with your partner. They enter it on their device to link.", fontSize = 11.sp, color = SecondaryTextLavender)
+                        Text(
+                            text = when (couplePair?.status) {
+                                "pending_accept" -> "Partner entered your code. They must tap Accept on their phone."
+                                "active" -> "Partnership active — opening your shared space…"
+                                else -> "Share the code with your partner. They enter it, then accept on their device."
+                            },
+                            fontSize = 11.sp,
+                            color = SecondaryTextLavender
+                        )
                     }
                 }
             }
@@ -4132,33 +4151,60 @@ fun CoupleConnectScreen(viewModel: MainViewModel) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Your partner's name and avatar are loaded from their invite in Supabase.",
+                    text = "Enter your partner's code, then confirm the link on this device (required for security).",
                     fontSize = 11.sp,
                     color = SecondaryTextLavender
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
-                    onClick = {
-                        scope.launch {
-                            isJoining = true
-                            joinError = viewModel.joinWithCoupleCode(inputCode)
-                            isJoining = false
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = ElectricLavender),
-                    shape = RoundedCornerShape(10.dp),
-                    enabled = inputCode.hasDigitsOrSpecial() && !isJoining
-                ) {
-                    Text(
-                        if (isJoining) "Linking..." else "Join partner space",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (!awaitingAccept) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isJoining = true
+                                joinError = viewModel.joinWithCoupleCode(inputCode)
+                                isJoining = false
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricLavender),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = inputCode.hasDigitsOrSpecial() && !isJoining
+                    ) {
+                        Text(
+                            if (isJoining) "Requesting..." else "Request to join",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    acceptError?.let { err ->
+                        Text(err, fontSize = 12.sp, color = Color(0xFFFF5252), modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isAccepting = true
+                                acceptError = viewModel.acceptCouplePartnership()
+                                isAccepting = false
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = !isAccepting
+                    ) {
+                        Text(
+                            if (isAccepting) "Activating..." else "Accept partnership on this device",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }

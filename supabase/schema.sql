@@ -132,5 +132,4 @@ with check (bucket_id = 'profile-images' and (storage.foldername(name))[1] = 'pr
 --    server-maintained couple membership table.
 -- 3. Do not create unrestricted anon policies for private couple data.
 -- 4. Restrict telemetry reads to an admin role or a protected server function.
--- 5. The current Android client has no Supabase Auth session yet; implement
---    Auth first, then enable policies that require authenticated access.
+-- 5. Run auth_rls_couples.sql after this file for JWT RLS, couple_pairs, and RPC pairing.

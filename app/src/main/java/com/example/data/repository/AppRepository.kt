@@ -68,6 +68,31 @@ class AppRepository(private val appDao: AppDao) {
 
     suspend fun deleteExpenseById(id: Int) = appDao.deleteExpenseById(id)
 
+    suspend fun tombstoneExpense(id: Int) {
+        val now = System.currentTimeMillis()
+        appDao.tombstoneExpense(id, now, now)
+    }
+
+    suspend fun tombstoneLearningTask(id: Int) {
+        val now = System.currentTimeMillis()
+        appDao.tombstoneLearningTask(id, now, now)
+    }
+
+    suspend fun tombstoneSavingTask(id: Int) {
+        val now = System.currentTimeMillis()
+        appDao.tombstoneSavingTask(id, now, now)
+    }
+
+    suspend fun tombstoneCalendarTask(id: String) {
+        val now = System.currentTimeMillis()
+        appDao.tombstoneCalendarTask(id, now, now)
+    }
+
+    suspend fun tombstoneRoadmap(id: Int) {
+        val now = System.currentTimeMillis()
+        appDao.tombstoneRoadmap(id, now, now)
+    }
+
     // --- Saving Tasks ---
     val allSavingTasksFlow: Flow<List<SavingTask>> = appDao.getAllSavingTasksFlow()
 

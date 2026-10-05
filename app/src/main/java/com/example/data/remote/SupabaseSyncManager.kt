@@ -40,8 +40,18 @@ private data class SupabaseAuthUser(val id: String? = null)
 private data class SupabaseAuthSession(val access_token: String? = null, val refresh_token: String? = null, val user: SupabaseAuthUser? = null)
 
 class SupabaseSyncManager(private val context: Context, private val appDao: AppDao) {
-    
+
     private val sharedPrefs = context.getSharedPreferences("duo_space_auth_prefs", Context.MODE_PRIVATE)
+    private val incrementalSync by lazy {
+        SupabaseIncrementalSync(
+            context = context,
+            appDao = appDao,
+            http = client,
+            accessTokenProvider = { accessToken() },
+            urlProvider = { getSupabaseUrl() },
+            anonKeyProvider = { getSupabaseAnonKey() }
+        )
+    }
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -65,14 +75,28 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             .remove("supabase_access_token")
             .remove("supabase_refresh_token")
             .remove("supabase_user_id")
+            .remove("active_couple_id")
             .apply()
     }
 
     fun authUserId(): String = sharedPrefs.getString("supabase_user_id", "") ?: ""
 
+    fun getActiveCoupleId(): String = sharedPrefs.getString("active_couple_id", "") ?: ""
+
+    fun saveActiveCoupleId(coupleId: String) {
+        sharedPrefs.edit().putString("active_couple_id", coupleId).apply()
+    }
+
+    fun hasAuthSession(): Boolean = accessToken().isNotBlank() && authUserId().isNotBlank()
+
     private fun accessToken(): String = sharedPrefs.getString("supabase_access_token", "") ?: ""
 
-    private fun authHeader(key: String): String = accessToken().ifBlank { key }
+    /** Authenticated REST calls must use the user JWT, not the anon key. */
+    private fun requireAccessToken(): String {
+        val token = accessToken()
+        check(token.isNotBlank()) { "Sign in required before cloud sync" }
+        return token
+    }
 
     private fun saveAuthSession(accessToken: String, refreshToken: String?) {
         sharedPrefs.edit()
@@ -85,15 +109,54 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
     // --- Dynamic Raw Client Implementations ---
 
-    private fun buildBaseRequest(tableName: String, method: String, url: String, key: String, queryParams: String = ""): Request.Builder {
+    private fun buildBaseRequest(
+        tableName: String,
+        url: String,
+        key: String,
+        queryParams: String = "",
+        useUserJwt: Boolean = true
+    ): Request.Builder {
         require(url.startsWith("https://")) { "Supabase URL must use HTTPS" }
         val fullUrl = if (url.endsWith("/")) "${url}rest/v1/$tableName" else "$url/rest/v1/$tableName"
         val finalUrl = if (queryParams.isNotBlank()) "$fullUrl?$queryParams" else fullUrl
-        
+        val bearer = if (useUserJwt) requireAccessToken() else key
+
         return Request.Builder()
             .url(finalUrl)
             .header("apikey", key)
-            .header("Authorization", "Bearer ${authHeader(key)}")
+            .header("Authorization", "Bearer $bearer")
+    }
+
+    suspend fun refreshSessionIfNeeded(): Boolean = withContext(Dispatchers.IO) {
+        val refresh = sharedPrefs.getString("supabase_refresh_token", "") ?: ""
+        if (refresh.isBlank()) return@withContext accessToken().isNotBlank()
+        val url = getSupabaseUrl().removeSuffix("/")
+        val key = getSupabaseAnonKey()
+        if (url.isBlank() || key.isBlank()) return@withContext false
+        try {
+            val payload = mapOf("refresh_token" to refresh)
+            val adapter = moshi.adapter<Map<String, String>>(
+                Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+            )
+            val request = Request.Builder()
+                .url("$url/auth/v1/token?grant_type=refresh_token")
+                .header("apikey", key)
+                .header("Content-Type", "application/json")
+                .post(adapter.toJson(payload).toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext false
+                val session = moshi.adapter(SupabaseAuthSession::class.java)
+                    .fromJson(response.body?.string().orEmpty())
+                if (session?.access_token.isNullOrBlank()) return@withContext false
+                saveAuthSession(session!!.access_token!!, session.refresh_token)
+                sharedPrefs.edit().putString("supabase_user_id", session.user?.id.orEmpty()).apply()
+                true
+            }
+        } catch (e: Exception) {
+            Log.e("SupabaseSync", "Session refresh failed", e)
+            false
+        }
     }
 
     // Validate the public key against Supabase Auth, not /rest/v1/.
@@ -148,7 +211,13 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             var databaseReachable = false
             var databaseNote = "Database tables were not verified."
             runCatching {
-                val tableRequest = buildBaseRequest("user_profiles", "GET", url, key, "select=id&limit=1")
+                val tableRequest = buildBaseRequest(
+                    "user_profiles",
+                    url,
+                    key,
+                    "select=id&limit=1",
+                    useUserJwt = false
+                )
                     .get()
                     .build()
                 client.newCall(tableRequest).execute().use { response ->
@@ -187,188 +256,51 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
     // --- Safe Table Clean Sync logic ---
 
-    suspend fun forcePushToSupabase() = withContext(Dispatchers.IO) {
-        val url = getSupabaseUrl()
-        val key = getSupabaseAnonKey()
-        
-        if (url.isBlank() || key.isBlank()) {
+    suspend fun forcePushToSupabase() = syncCoupleDataIncremental(pushOnly = true)
+
+    suspend fun forcePullFromSupabase() = syncCoupleDataIncremental(pullOnly = true)
+
+    suspend fun syncCoupleDataIncremental(
+        pushOnly: Boolean = false,
+        pullOnly: Boolean = false
+    ) = withContext(Dispatchers.IO) {
+        if (!isConfigured()) {
             _syncState.value = SupabaseSyncState.Error("Supabase URL or Anon Key is missing!")
             return@withContext
         }
-
+        if (!refreshSessionIfNeeded() || !hasAuthSession()) {
+            _syncState.value = SupabaseSyncState.Error("Sign in to sync with Supabase.")
+            return@withContext
+        }
+        val coupleId = getActiveCoupleId()
+        if (coupleId.isBlank()) {
+            _syncState.value = SupabaseSyncState.Error("Link with your partner before cloud sync.")
+            return@withContext
+        }
         try {
-            _syncState.value = SupabaseSyncState.Loading("Uploading local data safely...")
-            // Upsert local rows without deleting records from other devices or users.
-            _syncState.value = SupabaseSyncState.Loading("Pushing Profiles...")
-            // Synchronously reading from Room lists (cannot block Room Main but safe here)
-            val appDao = appDao
-
-            // Read flows synchronously by fetching their first values or through custom direct queries
-            // Since we need them immediately, get values from Room lists
-            // Since AppDao does not have synchronous getters for all lists yet, let's implement robust serialization
-            
-            // Let's retrieve all values safely using extension syntax
-            val profiles = appDao.getAllProfilesFlow().first()
-            if (profiles.isNotEmpty()) {
-                val adapter = moshi.adapter<List<UserProfile>>(Types.newParameterizedType(List::class.java, UserProfile::class.java))
-                val json = adapter.toJson(profiles)
-                postTableData("user_profiles", json, url, key)
+            if (!pullOnly) {
+                _syncState.value = SupabaseSyncState.Loading("Uploading changes…")
+                incrementalSync.push(coupleId)
             }
-
-            _syncState.value = SupabaseSyncState.Loading("Pushing Roadmaps and lessons...")
-            val roadmaps = appDao.getAllRoadmapsFlow().first()
-            if (roadmaps.isNotEmpty()) {
-                val adapter = moshi.adapter<List<LearningRoadmap>>(Types.newParameterizedType(List::class.java, LearningRoadmap::class.java))
-                val json = adapter.toJson(roadmaps)
-                postTableData("learning_roadmaps", json, url, key)
+            if (!pushOnly) {
+                _syncState.value = SupabaseSyncState.Loading("Downloading partner updates…")
+                incrementalSync.pull(coupleId)
             }
-
-            // Let's get all lessons. Since they are nested by roadmapId, we can get them dynamically
-            val allLessons = mutableListOf<RoadmapLesson>()
-            for (rm in roadmaps) {
-                allLessons.addAll(appDao.getLessonsForRoadmap(rm.id))
-            }
-            if (allLessons.isNotEmpty()) {
-                val adapter = moshi.adapter<List<RoadmapLesson>>(Types.newParameterizedType(List::class.java, RoadmapLesson::class.java))
-                val json = adapter.toJson(allLessons)
-                postTableData("roadmap_lessons", json, url, key)
-            }
-
-            _syncState.value = SupabaseSyncState.Loading("Pushing Tasks & Calendars...")
-            val learningTasks = appDao.getAllLearningTasksFlow().first()
-            if (learningTasks.isNotEmpty()) {
-                val adapter = moshi.adapter<List<LearningTask>>(Types.newParameterizedType(List::class.java, LearningTask::class.java))
-                val json = adapter.toJson(learningTasks)
-                postTableData("learning_tasks", json, url, key)
-            }
-
-            _syncState.value = SupabaseSyncState.Loading("Pushing Budget Expenses...")
-            val expenses = appDao.getAllExpensesFlow().first()
-            if (expenses.isNotEmpty()) {
-                val adapter = moshi.adapter<List<ExpenseEntry>>(Types.newParameterizedType(List::class.java, ExpenseEntry::class.java))
-                val json = adapter.toJson(expenses)
-                postTableData("expense_entries", json, url, key)
-            }
-
-            _syncState.value = SupabaseSyncState.Loading("Pushing Saving Tasks...")
-            val savings = appDao.getAllSavingTasksFlow().first()
-            if (savings.isNotEmpty()) {
-                val adapter = moshi.adapter<List<SavingTask>>(Types.newParameterizedType(List::class.java, SavingTask::class.java))
-                val json = adapter.toJson(savings)
-                postTableData("saving_tasks", json, url, key)
-            }
-
-            _syncState.value = SupabaseSyncState.Loading("Pushing Calendar Tasks...")
-            val calendarTasks = appDao.getAllCalendarTasksFlow().first()
-            if (calendarTasks.isNotEmpty()) {
-                val adapter = moshi.adapter<List<CalendarTask>>(Types.newParameterizedType(List::class.java, CalendarTask::class.java))
-                val json = adapter.toJson(calendarTasks)
-                postTableData("calendar_tasks", json, url, key)
-            }
-
-            _syncState.value = SupabaseSyncState.Success("All local data backed up to Supabase successfully!")
+            _syncState.value = SupabaseSyncState.Success("Couple data synced securely.")
         } catch (e: Exception) {
-            Log.e("SupabaseSync", "Push failed", e)
-            _syncState.value = SupabaseSyncState.Error("Sync failed: ${e.localizedMessage ?: "Unknown network error"}")
+            Log.e("SupabaseSync", "Incremental sync failed", e)
+            _syncState.value = SupabaseSyncState.Error("Sync failed: ${e.localizedMessage ?: "Unknown error"}")
         }
     }
 
-    suspend fun forcePullFromSupabase() = withContext(Dispatchers.IO) {
-        val url = getSupabaseUrl()
-        val key = getSupabaseAnonKey()
-
-        if (url.isBlank() || key.isBlank()) {
-            _syncState.value = SupabaseSyncState.Error("Supabase URL or Anon Key is missing!")
-            return@withContext
-        }
-
-        try {
-            _syncState.value = SupabaseSyncState.Loading("Downloading Profiles from Supabase...")
-            val profilesJson = getTableData("user_profiles", url, key)
-            val profilesList = if (profilesJson.isNotBlank()) {
-                val adapter = moshi.adapter<List<UserProfile>>(Types.newParameterizedType(List::class.java, UserProfile::class.java))
-                adapter.fromJson(profilesJson) ?: emptyList()
-            } else emptyList()
-
-            _syncState.value = SupabaseSyncState.Loading("Downloading Roadmaps from Supabase...")
-            val roadmapsJson = getTableData("learning_roadmaps", url, key)
-            val roadmapsList = if (roadmapsJson.isNotBlank()) {
-                val adapter = moshi.adapter<List<LearningRoadmap>>(Types.newParameterizedType(List::class.java, LearningRoadmap::class.java))
-                adapter.fromJson(roadmapsJson) ?: emptyList()
-            } else emptyList()
-
-            _syncState.value = SupabaseSyncState.Loading("Downloading Roadmap Lessons from Supabase...")
-            val lessonsJson = getTableData("roadmap_lessons", url, key)
-            val lessonsList = if (lessonsJson.isNotBlank()) {
-                val adapter = moshi.adapter<List<RoadmapLesson>>(Types.newParameterizedType(List::class.java, RoadmapLesson::class.java))
-                adapter.fromJson(lessonsJson) ?: emptyList()
-            } else emptyList()
-
-            _syncState.value = SupabaseSyncState.Loading("Downloading Learning Tasks from Supabase...")
-            val tasksJson = getTableData("learning_tasks", url, key)
-            val tasksList = if (tasksJson.isNotBlank()) {
-                val adapter = moshi.adapter<List<LearningTask>>(Types.newParameterizedType(List::class.java, LearningTask::class.java))
-                adapter.fromJson(tasksJson) ?: emptyList()
-            } else emptyList()
-
-            _syncState.value = SupabaseSyncState.Loading("Downloading Expense Entries from Supabase...")
-            val expensesJson = getTableData("expense_entries", url, key)
-            val expensesList = if (expensesJson.isNotBlank()) {
-                val adapter = moshi.adapter<List<ExpenseEntry>>(Types.newParameterizedType(List::class.java, ExpenseEntry::class.java))
-                adapter.fromJson(expensesJson) ?: emptyList()
-            } else emptyList()
-
-            _syncState.value = SupabaseSyncState.Loading("Downloading Saving Goals from Supabase...")
-            val savingsJson = getTableData("saving_tasks", url, key)
-            val savingsList = if (savingsJson.isNotBlank()) {
-                val adapter = moshi.adapter<List<SavingTask>>(Types.newParameterizedType(List::class.java, SavingTask::class.java))
-                adapter.fromJson(savingsJson) ?: emptyList()
-            } else emptyList()
-
-            _syncState.value = SupabaseSyncState.Loading("Downloading Calendar Tasks from Supabase...")
-            val calendarTasksJson = getTableData("calendar_tasks", url, key)
-            val calendarTasksList = if (calendarTasksJson.isNotBlank()) {
-                val adapter = moshi.adapter<List<CalendarTask>>(Types.newParameterizedType(List::class.java, CalendarTask::class.java))
-                adapter.fromJson(calendarTasksJson) ?: emptyList()
-            } else emptyList()
-
-            // Safe update Local Room database using atomic operations
-            _syncState.value = SupabaseSyncState.Loading("Rebuilding local Database cache...")
-
-            // Re-populate everything safely
-            for (profile in profilesList) {
-                appDao.insertProfile(profile)
-            }
-            for (roadmap in roadmapsList) {
-                appDao.insertRoadmap(roadmap)
-            }
-            for (lesson in lessonsList) {
-                appDao.insertLesson(lesson)
-            }
-            for (task in tasksList) {
-                appDao.insertLearningTask(task)
-            }
-            for (expense in expensesList) {
-                appDao.insertExpense(expense)
-            }
-            for (saving in savingsList) {
-                appDao.insertSavingTask(saving)
-            }
-            for (calendarTask in calendarTasksList) {
-                appDao.insertCalendarTask(calendarTask)
-            }
-
-            _syncState.value = SupabaseSyncState.Success("Restored ${profilesList.size + roadmapsList.size + lessonsList.size + tasksList.size + expensesList.size + savingsList.size + calendarTasksList.size} cached items from Supabase!")
-        } catch (e: Exception) {
-            Log.e("SupabaseSync", "Pull failed", e)
-            _syncState.value = SupabaseSyncState.Error("Restore failed: ${e.localizedMessage ?: "Unknown network error"}")
-        }
+    suspend fun stampLocalRowsWithCoupleId(coupleId: String) {
+        incrementalSync.stampCoupleIdLocally(coupleId)
     }
 
     // Helper POST tables
     private fun postTableData(tableName: String, json: String, url: String, key: String) {
         val mediaType = "application/json; charset=utf-8".toMediaType()
-        val request = buildBaseRequest(tableName, "POST", url, key)
+        val request = buildBaseRequest(tableName, url, key)
             .header("Prefer", "resolution=merge-duplicates") // Ask postgrest to upsert if possible
             .post(json.toRequestBody(mediaType))
             .build()
@@ -381,7 +313,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
 
     // Helper GET tables
     private fun getTableData(tableName: String, url: String, key: String, queryParams: String = "select=*"): String {
-        val request = buildBaseRequest(tableName, "GET", url, key, queryParams)
+        val request = buildBaseRequest(tableName, url, key, queryParams)
             .get()
             .build()
         client.newCall(request).execute().use { response ->
@@ -481,7 +413,10 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext false
         try {
+            val uid = authUserId()
+            if (uid.isBlank()) return@withContext false
             val accountData = mapOf(
+                "user_id" to uid,
                 "email" to email,
                 "name" to name,
                 "emoji" to emoji
@@ -490,7 +425,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             val json = adapter.toJson(accountData)
             
             val mediaType = "application/json; charset=utf-8".toMediaType()
-            val request = buildBaseRequest("user_accounts", "POST", url, key)
+            val request = buildBaseRequest("user_accounts", url, key)
                 .header("Prefer", "resolution=merge-duplicates") // upsert if same email
                 .post(json.toRequestBody(mediaType))
                 .build()
@@ -509,7 +444,13 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         val key = getSupabaseAnonKey()
         if (url.isBlank() || key.isBlank()) return@withContext null
         try {
-            val request = buildBaseRequest("user_accounts", "GET", url, key, "select=email,name,emoji&email=eq.$email&limit=1")
+            val uid = authUserId()
+            val query = if (uid.isNotBlank()) {
+                "select=email,name,emoji&user_id=eq.$uid&limit=1"
+            } else {
+                "select=email,name,emoji&email=eq.$email&limit=1"
+            }
+            val request = buildBaseRequest("user_accounts", url, key, query)
                 .get()
                 .build()
             client.newCall(request).execute().use { response ->
@@ -551,7 +492,7 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
             val json = adapter.toJson(telemetryData)
             
             val mediaType = "application/json; charset=utf-8".toMediaType()
-            val request = buildBaseRequest("device_status_telemetry", "POST", url, key)
+            val request = buildBaseRequest("device_status_telemetry", url, key, useUserJwt = true)
                 .header("Prefer", "resolution=merge-duplicates") // upsert if same device_id
                 .post(json.toRequestBody(mediaType))
                 .build()
@@ -594,52 +535,71 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         */
     }
 
-    suspend fun publishCoupleInvite(record: com.example.data.model.CoupleInviteRecord): Boolean =
-        withContext(Dispatchers.IO) {
-            val url = getSupabaseUrl()
-            val key = getSupabaseAnonKey()
-            if (url.isBlank() || key.isBlank()) return@withContext false
-            try {
-                val adapter = moshi.adapter<List<com.example.data.model.CoupleInviteRecord>>(
-                    Types.newParameterizedType(
-                        List::class.java,
-                        com.example.data.model.CoupleInviteRecord::class.java
-                    )
-                )
-                postTableData("couple_invites", adapter.toJson(listOf(record)), url, key)
-                true
-            } catch (e: Exception) {
-                Log.e("SupabaseSync", "Failed to publish couple invite", e)
-                false
+    private suspend fun callRpc(functionName: String, body: Map<String, Any?>): String? = withContext(Dispatchers.IO) {
+        refreshSessionIfNeeded()
+        val url = getSupabaseUrl().removeSuffix("/")
+        val key = getSupabaseAnonKey()
+        if (url.isBlank() || key.isBlank()) return@withContext null
+        try {
+            val token = requireAccessToken()
+            val adapter = moshi.adapter<Map<String, Any?>>(
+                Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+            )
+            val request = Request.Builder()
+                .url("$url/rest/v1/rpc/$functionName")
+                .header("apikey", key)
+                .header("Authorization", "Bearer $token")
+                .header("Content-Type", "application/json")
+                .post(adapter.toJson(body).toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.e("SupabaseSync", "RPC $functionName failed (${response.code}): $responseBody")
+                    return@withContext null
+                }
+                if (responseBody.isBlank() || responseBody == "null") return@withContext null
+                responseBody
             }
+        } catch (e: Exception) {
+            Log.e("SupabaseSync", "RPC $functionName error", e)
+            null
         }
+    }
 
-    suspend fun fetchCoupleInvite(code: String): com.example.data.model.CoupleInviteRecord? =
-        withContext(Dispatchers.IO) {
-            val url = getSupabaseUrl()
-            val key = getSupabaseAnonKey()
-            if (url.isBlank() || key.isBlank()) return@withContext null
-            val normalized = code.trim().uppercase()
-            try {
-                val json = getTableData(
-                    "couple_invites",
-                    url,
-                    key,
-                    "select=*&code=eq.$normalized&limit=1"
-                )
-                if (json.isBlank() || json == "[]") return@withContext null
-                val adapter = moshi.adapter<List<com.example.data.model.CoupleInviteRecord>>(
-                    Types.newParameterizedType(
-                        List::class.java,
-                        com.example.data.model.CoupleInviteRecord::class.java
-                    )
-                )
-                adapter.fromJson(json)?.firstOrNull()?.takeIf { it.isActive }
-            } catch (e: Exception) {
-                Log.e("SupabaseSync", "Failed to fetch couple invite", e)
-                null
-            }
-        }
+    suspend fun createCouplePairInvite(code: String, creatorName: String, creatorEmoji: String): CouplePairRecord? {
+        val json = callRpc(
+            "create_couple_invite",
+            mapOf(
+                "p_invite_code" to code,
+                "p_creator_name" to creatorName,
+                "p_creator_emoji" to creatorEmoji
+            )
+        ) ?: return null
+        return moshi.adapter(CouplePairRecord::class.java).fromJson(json)
+    }
+
+    suspend fun requestCoupleJoin(code: String, joinerName: String, joinerEmoji: String): CouplePairRecord? {
+        val json = callRpc(
+            "request_couple_join",
+            mapOf(
+                "p_invite_code" to code.trim().uppercase(),
+                "p_joiner_name" to joinerName,
+                "p_joiner_emoji" to joinerEmoji
+            )
+        ) ?: return null
+        return moshi.adapter(CouplePairRecord::class.java).fromJson(json)
+    }
+
+    suspend fun acceptCouplePartnership(pairId: String): CouplePairRecord? {
+        val json = callRpc("accept_couple_partnership", mapOf("p_pair_id" to pairId)) ?: return null
+        return moshi.adapter(CouplePairRecord::class.java).fromJson(json)
+    }
+
+    suspend fun fetchMyCouplePair(): CouplePairRecord? {
+        val json = callRpc("get_my_couple_pair", emptyMap()) ?: return null
+        return moshi.adapter(CouplePairRecord::class.java).fromJson(json)
+    }
 
     suspend fun requestPasswordReset(email: String): String? = withContext(Dispatchers.IO) {
         val url = getSupabaseUrl()
@@ -671,16 +631,26 @@ class SupabaseSyncManager(private val context: Context, private val appDao: AppD
         withContext(Dispatchers.IO) {
             val url = getSupabaseUrl()
             val key = getSupabaseAnonKey()
-            if (url.isBlank() || key.isBlank()) return@withContext false
+            val coupleId = getActiveCoupleId()
+            if (url.isBlank() || key.isBlank() || coupleId.isBlank() || !hasAuthSession()) return@withContext false
             try {
-                val adapter = moshi.adapter<List<com.example.data.model.PartnerLocationRecord>>(
+                val cloudOwnerId = authUserId()
+                val payload = mapOf(
+                    "ownerId" to cloudOwnerId,
+                    "latitude" to record.latitude,
+                    "longitude" to record.longitude,
+                    "accuracyMeters" to record.accuracyMeters,
+                    "isSharingEnabled" to record.isSharingEnabled,
+                    "updatedAt" to record.updatedAt,
+                    "coupleId" to coupleId
+                )
+                val adapter = moshi.adapter<List<Map<String, Any?>>>(
                     Types.newParameterizedType(
                         List::class.java,
-                        com.example.data.model.PartnerLocationRecord::class.java
+                        Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
                     )
                 )
-                val json = adapter.toJson(listOf(record))
-                postTableData("couple_location_updates", json, url, key)
+                postTableData("couple_location_updates", adapter.toJson(listOf(payload)), url, key)
                 true
             } catch (e: Exception) {
                 Log.e("SupabaseSync", "Failed to push partner location", e)
